@@ -26,6 +26,16 @@ function h(tag, attrs, ...kids) {
   return n;
 }
 
+/**
+ * 자식 노드 교체.
+ * replaceChildren 은 가변인자만 받으므로 배열이나 null 을 그대로 넘기면
+ * "[object HTMLDivElement]" 나 "null" 이 글자로 박힌다. 여기서 펼치고 걸러낸다.
+ */
+function setChildren(node, ...kids) {
+  node.replaceChildren(
+    ...kids.flat(3).filter((k) => k !== null && k !== undefined && k !== false));
+}
+
 async function api(path, method = 'GET', body) {
   const res = await fetch(path, {
     method,
@@ -63,16 +73,29 @@ const STATUS_KO = { ok: '정상', warn: '주의', fail: '실패', load: '확인 
 
 /* ── 상태 ─────────────────────────────────────────────────── */
 
-const S = { master: null, tab: 'metrics', entity: 'HQ', cat: 'all', editing: null, audit: null };
+const S = { me: null, master: null, tab: 'metrics', entity: 'HQ', cat: 'all', editing: null };
 
 /* ── 라우터 ───────────────────────────────────────────────── */
 
+/* 화면은 각자 자기 파일에서 등록한다. input.js 가 sheet · input 을 추가한다 */
 const ROUTES = { master: viewMaster, health: viewHealth };
 
+/** 로그인한 사람의 일이 첫 화면이 된다 */
+function defaultRoute() {
+  const me = S.me;
+  if (!me || !me.can) return 'health';
+  if (me.can.master) return 'master';
+  if (me.can.input) {
+    const entity = me.default_entity || 'HQ';
+    return entity === 'HQ' ? 'input' : 'sheet';
+  }
+  return 'health';
+}
+
 function currentRoute() {
-  const parts = (location.hash || '#/master').replace(/^#\//, '').split('/').filter(Boolean);
-  const name = ROUTES[parts[0]] ? parts[0] : 'master';
-  return { name, tab: parts[1] || null, ctx: parts[2] || null, item: parts[3] || null };
+  const parts = (location.hash || '').replace(/^#\//, '').split('/').filter(Boolean);
+  const name = ROUTES[parts[0]] ? parts[0] : defaultRoute();
+  return { name, seg: parts.slice(1) };
 }
 
 /** 지금 상태를 주소로 만든다. 새로고침해도 유지되고 링크를 공유할 수 있다 */
@@ -81,9 +104,10 @@ function hashFor(tab, ctx, item) {
 }
 
 async function route() {
-  const { name, tab, ctx, item } = currentRoute();
-  // 탭 · 필터 · 편집 대상을 주소에서 읽는다
+  const { name, seg } = currentRoute();
+  // 기준정보 화면은 탭 · 필터 · 편집 대상을 주소에서 읽는다
   if (name === 'master') {
+    const [tab, ctx, item] = seg;
     if (tab && TABS.some(([k]) => k === tab)) S.tab = tab;
     if (S.tab === 'metrics') {
       S.cat = ctx || 'all';
@@ -99,7 +123,7 @@ async function route() {
     a.classList.toggle('on', a.dataset.route === name);
   });
   const view = document.getElementById('view');
-  view.replaceChildren(h('div', { class: 'banner load' }, h('p', { text: '불러오는 중…' })));
+  setChildren(view, h('div', { class: 'banner load' }, h('p', { text: '불러오는 중…' })));
   await ROUTES[name](view);
 }
 
@@ -107,17 +131,41 @@ window.addEventListener('hashchange', route);
 
 /* ── 상단 사용자 표시 ─────────────────────────────────────── */
 
-async function loadWhoami() {
+async function loadMe() {
   const box = document.getElementById('whoami');
   const r = await api('/api/me');
-  if (r.status === 401) { box.textContent = '로그인 필요'; return; }
-  const roles = (r.data && r.data.roles) || [];
-  if (roles.length === 0) { box.textContent = '역할 미매핑'; return; }
-  const labels = ((r.data && r.data.assignments) || []).map((a) => a.role_label);
-  box.replaceChildren(
-    h('div', { text: labels[0] || roles[0] }),
-    roles.length > 1 ? h('div', { class: 'num', text: roles.join(' · ') }) : null,
-  );
+  S.me = r.ok ? r.data : null;
+
+  if (r.status === 401) { box.textContent = '로그인 필요'; }
+  else if (!S.me || (S.me.roles || []).length === 0) { box.textContent = '역할 미매핑'; }
+  else {
+    const labels = (S.me.assignments || []).map((a) => a.role_label);
+    setChildren(box,
+      h('div', { text: labels[0] || S.me.roles[0] }),
+      S.me.roles.length > 1 ? h('div', { class: 'num', text: S.me.roles.join(' · ') }) : null);
+  }
+  buildNav();
+}
+
+/** 권한에 따라 네비를 만든다. 없는 권한의 메뉴를 눌러 거부당하는 일이 없게 한다 */
+function buildNav() {
+  const nav = document.getElementById('nav');
+  const me = S.me || {};
+  const can = me.can || {};
+  const entity = me.default_entity || 'HQ';
+  const links = [];
+
+  if (can.input || can.all_entities) {
+    if (entity === 'HQ' || can.all_entities) links.push(['input', '내 입력']);
+    links.push(['sheet', '월간 입력 시트']);
+  }
+  if (can.master) links.push(['master', '기준정보']);
+  links.push(['health', '시스템 상태']);
+
+  setChildren(nav, links.map(([routeName, label]) => h('a', {
+    href: routeName === 'sheet' ? `#/sheet/${entity}` : '#/' + routeName,
+    'data-route': routeName, text: label,
+  })));
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -137,7 +185,7 @@ async function viewMaster(view) {
   if (!S.master) {
     const r = await api('/api/master');
     if (!r.ok) {
-      view.replaceChildren(
+      setChildren(view, 
         h('div', { class: 'banner fail' },
           h('h2', { text: '기준정보를 불러올 수 없습니다' }),
           h('p', { text: (r.data && (r.data.hint || r.data.error)) || '알 수 없는 오류' })),
@@ -174,7 +222,7 @@ async function viewMaster(view) {
     }, label, counts[key] !== null ? h('span', { class: 'count', text: String(counts[key]) }) : null)));
 
   const body = h('div');
-  view.replaceChildren(head, tabs, body);
+  setChildren(view, head, tabs, body);
 
   if (S.tab === 'metrics') renderMetrics(body);
   else if (S.tab === 'assign') renderAssign(body);
@@ -237,7 +285,7 @@ function renderMetrics(root) {
     ));
   }
 
-  root.replaceChildren(
+  setChildren(root, 
     chips,
     editingMetric ? h('div', { class: 'card flush editing-card' }, metricEditor(editingMetric)) : null,
     h('div', { class: 'card flush' },
@@ -377,7 +425,7 @@ function renderAssign(root) {
     ));
   }
 
-  root.replaceChildren(
+  setChildren(root, 
     entityChips,
     h('div', { class: 'banner ' + (missing ? 'fail' : 'ok') },
       h('div', { class: 'banner-row' },
@@ -454,7 +502,7 @@ function renderUnits(root) {
     await reloadMaster();
   });
 
-  root.replaceChildren(
+  setChildren(root, 
     h('div', { class: 'hint info' },
       '법인별로 현지 고지서 관행에 맞춰 입력 단위를 고정합니다. ',
       '심양 전기요금 고지서는 万kWh 단위를 쓰므로 그대로 받고 시스템이 kWh 로 환산합니다. ',
@@ -536,7 +584,7 @@ function renderFactors(root) {
     await reloadMaster();
   });
 
-  root.replaceChildren(
+  setChildren(root, 
     M.factors.length === 0
       ? h('div', { class: 'banner warn' },
           h('h2', { text: '배출계수가 아직 등록되지 않았습니다 — 이 단계에서는 정상입니다' }),
@@ -612,7 +660,7 @@ function renderFx(root) {
     await reloadMaster();
   });
 
-  root.replaceChildren(
+  setChildren(root, 
     h('div', { class: 'hint info' },
       '집약도 지표의 분모(매출액)는 3법인 통화가 다릅니다. ',
       h('b', { text: '연평균 환율' }), ' 을 적용하고, 적용 환율을 산정 결과에 함께 기록합니다. ',
@@ -660,7 +708,7 @@ async function renderAudit(root) {
       h('td', { class: 'right role-code', text: e.changed_by_role || '—' }),
     ));
   }
-  root.replaceChildren(
+  setChildren(root, 
     h('div', { class: 'hint info' },
       '기준정보 변경은 모두 이력으로 남습니다. 누가 아니라 ', h('b', { text: '어느 역할이' }),
       ' 바꿨는지 기록됩니다 — 개인정보를 남기지 않기 때문입니다.'),
@@ -686,7 +734,7 @@ const CHECK_LABEL = {
 async function viewHealth(view) {
   const r = await api('/api/health');
   if (!r.data) {
-    view.replaceChildren(h('div', { class: 'banner fail' },
+    setChildren(view, h('div', { class: 'banner fail' },
       h('h2', { text: '서버에 연결할 수 없습니다' }),
       h('p', { text: '배포 상태를 확인하세요.' })));
     return;
@@ -731,7 +779,7 @@ async function viewHealth(view) {
 
   const raw = h('pre', { hidden: true, text: JSON.stringify(H, null, 2) });
 
-  view.replaceChildren(
+  setChildren(view, 
     h('div', { class: 'page-head' }, h('div', null,
       h('div', { class: 'eyebrow', text: '시스템 상태' }),
       h('h1', { text: 'W0 — 배포 파이프라인 확인 (G0)' }))),
@@ -749,5 +797,8 @@ async function viewHealth(view) {
 
 /* ── 시작 ─────────────────────────────────────────────────── */
 
-loadWhoami();
-route();
+/* 모든 화면 파일이 ROUTES 에 등록을 마친 뒤 시작한다 */
+window.addEventListener('DOMContentLoaded', async () => {
+  await loadMe();
+  await route();
+});

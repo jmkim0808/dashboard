@@ -19,6 +19,11 @@
  * 반드시 "true" 로 되돌린다.
  */
 
+import {
+  loadSheet, saveEntry, submitSheet, uploadEvidence, fetchEvidence,
+  inputScope, isValidPeriod,
+} from './entry.js';
+
 const ACCESS_EMAIL_HEADER = 'Cf-Access-Authenticated-User-Email';
 
 const JSON_HEADERS = {
@@ -118,6 +123,43 @@ async function authorizeMaster(request, env) {
     }, 403) };
   }
   return { roles: rows.results, scopes, actor: rows.results[0].code };
+}
+
+/** Access 헤더 → 역할 행. 인증되지 않았거나 매핑이 없으면 빈 배열 */
+async function loadRoleRows(request, env) {
+  const identity = resolveRoles(request, env);
+  if (identity.roles.length === 0) return { identity, rows: [] };
+  const ph = identity.roles.map(() => '?').join(',');
+  const rows = await env.DB.prepare(
+    `SELECT code, scope, entity_code, label_ko, locale FROM role
+      WHERE code IN (${ph}) AND is_active = 1 ORDER BY code`
+  ).bind(...identity.roles).all();
+  return { identity, rows: rows.results };
+}
+
+/**
+ * 입력 API 공통 권한 확인.
+ * REQUIRE_ACCESS=false 일 때만 로컬 확인용으로 본사 총괄 역할을 가정한다.
+ */
+async function authorizeInput(request, env) {
+  const { identity, rows } = await loadRoleRows(request, env);
+  const required = String(env.REQUIRE_ACCESS ?? 'true') !== 'false';
+
+  if (!identity.authenticated) {
+    if (required) {
+      return { error: json({ error: 'unauthenticated', hint: 'Cloudflare Access 로그인이 필요합니다.' }, 401) };
+    }
+    const fallback = await env.DB.prepare(
+      `SELECT code, scope, entity_code, label_ko, locale FROM role WHERE code = 'HQ_ESG'`
+    ).first();
+    const local = fallback ? [fallback] : [];
+    return { rows: local, scope: inputScope(local), actor: fallback ? fallback.code : null };
+  }
+  if (rows.length === 0) {
+    return { error: json({ error: 'no_role',
+      hint: '이 계정에 역할이 매핑되지 않았습니다. 총괄에게 문의하세요.' }, 403) };
+  }
+  return { rows, scope: inputScope(rows), actor: rows[0].code };
 }
 
 /** 마스터 변경을 이력으로 남긴다 (D-4 정신 — entry 외의 변경도 추적한다) */
@@ -491,7 +533,22 @@ async function handleMe(request, env) {
       ORDER BY r.code`
   ).bind(...identity.roles).all();
 
-  return json({ roles: identity.roles, assignments: rows.results });
+  const scopes = [...new Set(rows.results.map((r) => r.scope))];
+  const entryEntities = [...new Set(rows.results.filter((r) => r.scope === 'entry').map((r) => r.entity_code))];
+  const isManager = scopes.some((s) => ['manager', 'approver', 'admin'].includes(s));
+  return json({
+    roles: identity.roles,
+    assignments: rows.results,
+    scopes,
+    can: {
+      master: isManager,
+      input: rows.results.some((r) => r.scope === 'entry') || isManager,
+      all_entities: isManager,
+    },
+    entry_entities: entryEntities,
+    default_entity: entryEntities[0] || 'HQ',
+    default_locale: rows.results[0] ? rows.results[0].locale : 'ko',
+  });
 }
 
 export default {
@@ -502,6 +559,52 @@ export default {
       try {
         if (url.pathname === '/api/health') return await handleHealth(request, env);
         if (url.pathname === '/api/me')     return await handleMe(request, env);
+
+        if (url.pathname.startsWith('/api/entry')) {
+          const auth = await authorizeInput(request, env);
+          if (auth.error) return auth.error;
+          const { scope, actor } = auth;
+
+          if (url.pathname === '/api/entry/sheet' && request.method === 'GET') {
+            const entityCode = url.searchParams.get('entity');
+            const period = url.searchParams.get('period');
+            if (!entityCode || !period || !isValidPeriod(period)) {
+              return json({ error: 'invalid_params', hint: 'entity 와 period(YYYY-MM) 가 필요합니다.' }, 400);
+            }
+            if (!scope.isManager && !(scope.entities || []).includes(entityCode)) {
+              return json({ error: 'forbidden_entity',
+                hint: '자기 법인의 데이터만 조회할 수 있습니다.' }, 403);
+            }
+            const sheet = await loadSheet(env, entityCode, period, scope);
+            if (sheet.error) return json(sheet, 404);
+            return json(sheet);
+          }
+          if (url.pathname === '/api/entry' && request.method === 'POST') {
+            const body = await request.json().catch(() => ({}));
+            const r = await saveEntry(env, body, scope, actor);
+            return json(r.body, r.status);
+          }
+          if (url.pathname === '/api/entry/submit' && request.method === 'POST') {
+            const body = await request.json().catch(() => ({}));
+            if (!body.entity_code || !isValidPeriod(body.period || '')) {
+              return json({ error: 'invalid_params' }, 400);
+            }
+            const r = await submitSheet(env, body.entity_code, body.period, scope);
+            return json(r.body, r.status);
+          }
+          if (url.pathname === '/api/entry/evidence' && request.method === 'POST') {
+            const r = await uploadEvidence(env, request, scope, actor);
+            return json(r.body, r.status);
+          }
+          if (url.pathname === '/api/entry/evidence' && request.method === 'GET') {
+            const key = url.searchParams.get('key');
+            if (!key) return json({ error: 'missing_key' }, 400);
+            const r = await fetchEvidence(env, key, scope);
+            if (r.status !== 200) return json({ error: 'not_found_or_forbidden' }, r.status);
+            return new Response(r.stream, { headers: r.headers });
+          }
+          return json({ error: 'not_found', path: url.pathname, method: request.method }, 404);
+        }
 
         if (url.pathname.startsWith('/api/master')) {
           const auth = await authorizeMaster(request, env);
