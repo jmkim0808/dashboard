@@ -442,3 +442,40 @@ CREATE VIEW v_ratio_metric AS
 SELECT code, name_ko, unit_standard, numerator_codes, denominator_codes, multiplier
 FROM metric
 WHERE is_calculated = 1 AND calc_kind = 'ratio';
+
+-- -----------------------------------------------------------------------------
+-- W4 추가 — 표준단위·배분 적용값 (테이블 변경 없음. 파생 뷰만 추가)
+--
+-- 같은 환산 규칙이 calc.js 와 report.js 에 각각 적혀 있으면 언젠가 어긋난다.
+-- 어긋나면 "조회 화면의 전력 사용량"과 "산정에 쓰인 전력 사용량"이 달라지고,
+-- 같은 보고서 안에 두 숫자가 실린다. 그래서 규칙을 이 뷰 하나에만 둔다.
+--
+--   value_alloc = 원본값 × 단위환산계수 × 배분율
+--
+-- 배분율은 **임대 사업장의 환경(E) 물량에만** 적용한다.
+-- 임대 건물의 전기·수도·폐기물은 건물 전체 기준 고지서이므로 우리 몫만 잡아야 하고 (R61),
+-- 인원·근로시간은 임대와 무관하므로 배분하지 않는다.
+-- -----------------------------------------------------------------------------
+
+DROP VIEW IF EXISTS v_entry_alloc;
+CREATE VIEW v_entry_alloc AS
+SELECT
+  e.id, e.entity_code, e.site_id, e.metric_code, e.period, e.status,
+  e.unavailable_reason_code, e.approved_at, e.closed_at,
+  m.category, m.period_type, m.aggregation, m.unit_standard,
+  m.factor_type, m.ghg_scope, m.name_ko, m.sort_order, m.disclosure_level, m.gri_code,
+  s.name_ko AS site_name, s.ownership, s.allocation_basis,
+  e.value_raw,
+  COALESCE(o.factor_to_standard, 1.0) AS to_standard,
+  CASE WHEN s.ownership = 'leased' AND m.category = 'E'
+       THEN COALESCE(s.allocation_ratio, 1.0) ELSE 1.0 END AS allocation_ratio,
+  CASE WHEN e.value_raw IS NULL THEN NULL
+       ELSE e.value_raw * COALESCE(o.factor_to_standard, 1.0)
+            * CASE WHEN s.ownership = 'leased' AND m.category = 'E'
+                   THEN COALESCE(s.allocation_ratio, 1.0) ELSE 1.0 END
+  END AS value_alloc
+FROM entry e
+JOIN metric m ON m.code = e.metric_code
+JOIN site s   ON s.id = e.site_id
+LEFT JOIN metric_unit_override o
+       ON o.metric_code = e.metric_code AND o.entity_code = e.entity_code;

@@ -68,24 +68,21 @@ export async function computeMonth(env, entityCode, period, version) {
       hint: `계수 버전 ${version} 이 등록되지 않았습니다. 기준정보 → 배출계수에서 등록하세요.` };
   }
 
-  // 사용량 + 사업장 배분율 + 지표의 산정 속성
+  // 사용량 — 단위환산·배분 규칙은 v_entry_alloc 한 곳에만 있다 (schema.sql 참조)
   const rows = await env.DB.prepare(
-    `SELECT e.metric_code, e.site_id, e.status, e.value_raw,
-            m.name_ko, m.factor_type, m.ghg_scope, m.unit_standard,
-            COALESCE(o.factor_to_standard, 1.0) AS to_standard,
-            s.name_ko AS site_name, s.ownership,
-            COALESCE(s.allocation_ratio, 1.0) AS allocation_ratio, s.allocation_basis
-       FROM entry e
-       JOIN metric m ON m.code = e.metric_code
-       JOIN site s   ON s.id = e.site_id
-       LEFT JOIN metric_unit_override o
-              ON o.metric_code = e.metric_code AND o.entity_code = e.entity_code
-      WHERE e.entity_code = ? AND e.period = ?
-        AND m.factor_type IS NOT NULL
-      ORDER BY m.sort_order`
+    `SELECT metric_code, site_id, status, value_raw, name_ko, factor_type, ghg_scope,
+            unit_standard, to_standard, allocation_ratio, value_alloc,
+            site_name, ownership, allocation_basis
+       FROM v_entry_alloc
+      WHERE entity_code = ? AND period = ? AND factor_type IS NOT NULL
+      ORDER BY sort_order`
   ).bind(entityCode, period).all();
 
   const totals = { scope1: 0, scope2: 0, energy_tj: 0 };
+  // 계수가 있어서 실제로 합산에 기여한 항목 수.
+  // 이게 0 이면 그 스코프는 "0" 이 아니라 "산정하지 못했다" 이다.
+  // 0 으로 내려주면 화면과 보고서에 "직접배출 없음"으로 찍힌다 — 확인한 적 없는 사실이다.
+  const priced = { scope1: 0, scope2: 0, energy: 0 };
   const lines = [];
   const unpriced = [];
   const excluded = [];
@@ -98,9 +95,9 @@ export async function computeMonth(env, entityCode, period, version) {
     }
     if (r.status === 'entered' || r.status === 'returned') pendingApproval += 1;
 
-    // 원본 → 표준단위 → 임대 배분 (R61)
+    // 원본 → 표준단위 → 임대 배분 (R61). 뷰가 계산한 값을 그대로 쓴다
     const standard = r.value_raw * r.to_standard;
-    const allocated = standard * r.allocation_ratio;
+    const allocated = r.value_alloc;
 
     const emission = pickFactor(factorSet, r.factor_type, 'emission', entity.grid_region, targetYear);
     const heating = pickFactor(factorSet, r.factor_type, 'heating_value', entity.grid_region, targetYear);
@@ -127,7 +124,9 @@ export async function computeMonth(env, entityCode, period, version) {
 
     if (emission && r.ghg_scope) {
       const tco2 = allocated * emission.value;
-      totals[r.ghg_scope === 1 ? 'scope1' : 'scope2'] += tco2;
+      const key = r.ghg_scope === 1 ? 'scope1' : 'scope2';
+      totals[key] += tco2;
+      priced[key] += 1;
       line.emission_factor = emission.value;
       line.emission_factor_year = emission.year;
       line.emission_factor_source = emission.source;
@@ -143,6 +142,7 @@ export async function computeMonth(env, entityCode, period, version) {
     if (heating) {
       const tj = allocated * heating.value;
       totals.energy_tj += tj;
+      priced.energy += 1;
       line.heating_factor = heating.value;
       line.energy_tj = tj;
     }
@@ -150,12 +150,18 @@ export async function computeMonth(env, entityCode, period, version) {
     lines.push(line);
   }
 
+  // 산정하지 못한 스코프는 null 이다. 합계는 산정된 부분만 더하고, 그 사실을 partial 로 알린다
+  const s1 = priced.scope1 > 0 ? round(totals.scope1, 4) : null;
+  const s2 = priced.scope2 > 0 ? round(totals.scope2, 4) : null;
+  const tj = priced.energy > 0 ? round(totals.energy_tj, 6) : null;
   const results = {
-    scope1: round(totals.scope1, 4),
-    scope2: round(totals.scope2, 4),
-    scope12: round(totals.scope1 + totals.scope2, 4),
-    energy_tj: round(totals.energy_tj, 6),
-    energy_toe: round((totals.energy_tj * 1000) / GJ_PER_TOE, 3),
+    scope1: s1,
+    scope2: s2,
+    scope12: s1 === null && s2 === null ? null : round((s1 || 0) + (s2 || 0), 4),
+    energy_tj: tj,
+    energy_toe: tj === null ? null : round((tj * 1000) / GJ_PER_TOE, 3),
+    // 이 합계에 빠진 것이 있는지 — 화면이 "(Scope 1 미산정 제외)" 를 붙일 근거
+    partial: { scope1: s1 === null, scope2: s2 === null, energy: tj === null },
   };
 
   return {
@@ -278,23 +284,22 @@ export async function annualValue(env, entityCode, year, metricCode, version) {
     return r && r.total !== null ? r.total : null;
   }
 
-  const agg = m.aggregation === 'avg' ? 'AVG(value_raw)'
-    : m.aggregation === 'eop' ? null
-    : 'SUM(value_raw)';
-
-  if (agg === null) {
+  // 원천 지표는 v_entry_alloc.value_alloc 을 쓴다 — 단위환산과 배분이 적용된 값이다.
+  // value_raw 를 그대로 더하면 심양 전력(万kWh)과 본사 전력(kWh)이 섞여 합산된다.
+  if (m.aggregation === 'eop') {
     // 기말값 — 그 연도의 가장 늦은 달
     const r = await env.DB.prepare(
-      `SELECT value_raw FROM entry
-        WHERE entity_code = ? AND metric_code = ? AND period LIKE ? AND value_raw IS NOT NULL
+      `SELECT value_alloc FROM v_entry_alloc
+        WHERE entity_code = ? AND metric_code = ? AND period LIKE ? AND value_alloc IS NOT NULL
         ORDER BY period DESC LIMIT 1`
     ).bind(entityCode, metricCode, `${year}-%`).first();
-    return r ? r.value_raw : null;
+    return r ? r.value_alloc : null;
   }
 
+  const agg = m.aggregation === 'avg' ? 'AVG(value_alloc)' : 'SUM(value_alloc)';
   const r = await env.DB.prepare(
-    `SELECT ${agg} AS v FROM entry
-      WHERE entity_code = ? AND metric_code = ? AND period LIKE ? AND value_raw IS NOT NULL`
+    `SELECT ${agg} AS v FROM v_entry_alloc
+      WHERE entity_code = ? AND metric_code = ? AND period LIKE ? AND value_alloc IS NOT NULL`
   ).bind(entityCode, metricCode, `${year}-%`).first();
   return r && r.v !== null ? r.v : null;
 }
@@ -411,13 +416,16 @@ export async function computeYear(env, year, version, fxVersion) {
   ).all();
 
   const perEntity = [];
-  const group = { scope1: 0, scope2: 0, energy_tj: 0, energy_toe: 0 };
+  const group = { scope1: null, scope2: null, energy_tj: null, energy_toe: null };
   const unpricedAll = new Map();
   const calcAnnual = {};
   let monthsComputed = 0;
 
+  /** null 은 "산정하지 못했다"이므로 0 처럼 더하지 않는다. 한 달이라도 나오면 그때부터 합산한다 */
+  const add = (acc, key, v) => { if (v !== null) acc[key] = (acc[key] || 0) + v; };
+
   for (const e of entities.results) {
-    const totals = { scope1: 0, scope2: 0, energy_tj: 0, energy_toe: 0 };
+    const totals = { scope1: null, scope2: null, energy_tj: null, energy_toe: null };
     const months = [];
     for (let m = 1; m <= 12; m += 1) {
       const period = `${year}-${String(m).padStart(2, '0')}`;
@@ -426,10 +434,10 @@ export async function computeYear(env, year, version, fxVersion) {
       const hasData = c.lines.length > 0;
       if (hasData) {
         monthsComputed += 1;
-        totals.scope1 += c.results.scope1;
-        totals.scope2 += c.results.scope2;
-        totals.energy_tj += c.results.energy_tj;
-        totals.energy_toe += c.results.energy_toe;
+        add(totals, 'scope1', c.results.scope1);
+        add(totals, 'scope2', c.results.scope2);
+        add(totals, 'energy_tj', c.results.energy_tj);
+        add(totals, 'energy_toe', c.results.energy_toe);
         months.push({ period, ...c.results });
       }
       for (const u of c.unpriced) {
@@ -441,30 +449,35 @@ export async function computeYear(env, year, version, fxVersion) {
     // 보고서에 인쇄된 법인별 수치를 독자가 더했을 때 합계가 나와야 한다.
     // 반올림 전 값으로 합하면 "3법인을 더했는데 합계와 0.01 다르다"는 질문을 받게 되고,
     // 그 질문에는 답할 방법이 없다. 월 → 연 → 그룹 모두 같은 규칙을 쓴다.
+    const rd = (v, d) => (v === null ? null : round(v, d));
     const rounded = {
-      scope1: round(totals.scope1, 3), scope2: round(totals.scope2, 3),
-      energy_tj: round(totals.energy_tj, 4),
-      energy_toe: round(totals.energy_toe, 2),
+      scope1: rd(totals.scope1, 3), scope2: rd(totals.scope2, 3),
+      energy_tj: rd(totals.energy_tj, 4),
+      energy_toe: rd(totals.energy_toe, 2),
     };
     // 집약도 지표(E-C5 · E-C6)의 분자로 쓰인다. 인쇄되는 값과 같은 값을 써야 한다
     calcAnnual[e.code] = {
       'E-C1': rounded.energy_tj, 'E-C2': rounded.energy_toe,
       'E-C3': rounded.scope1, 'E-C4': rounded.scope2,
     };
+    const toe = rounded.energy_toe;
     perEntity.push({
       entity_code: e.code, name_ko: e.name_ko, grid_region: e.grid_region,
       ...rounded,
-      scope12: round(rounded.scope1 + rounded.scope2, 3),
+      scope12: rounded.scope1 === null && rounded.scope2 === null ? null
+        : round((rounded.scope1 || 0) + (rounded.scope2 || 0), 3),
+      partial: { scope1: rounded.scope1 === null, scope2: rounded.scope2 === null,
+                 energy: rounded.energy_tj === null },
       months,
       // R10 / R33 — 빈푹 법인의 현지 법정 보고 의무 판정 기준
-      toe_threshold: { limit: 1000, ratio: round(rounded.energy_toe / 1000, 3),
-                       exceeded: rounded.energy_toe >= 1000,
-                       near: rounded.energy_toe >= 800 && rounded.energy_toe < 1000 },
+      toe_threshold: toe === null ? null
+        : { limit: 1000, ratio: round(toe / 1000, 3),
+            exceeded: toe >= 1000, near: toe >= 800 && toe < 1000 },
     });
-    group.scope1 += rounded.scope1;
-    group.scope2 += rounded.scope2;
-    group.energy_tj += rounded.energy_tj;
-    group.energy_toe += rounded.energy_toe;
+    add(group, 'scope1', rounded.scope1);
+    add(group, 'scope2', rounded.scope2);
+    add(group, 'energy_tj', rounded.energy_tj);
+    add(group, 'energy_toe', rounded.energy_toe);
   }
 
   const codes = entities.results.map((e) => e.code);
@@ -478,10 +491,14 @@ export async function computeYear(env, year, version, fxVersion) {
     year, version, fx_version: fxVer,
     entities: perEntity,
     group: {
-      scope1: round(group.scope1, 3), scope2: round(group.scope2, 3),
-      scope12: round(group.scope1 + group.scope2, 3),
-      energy_tj: round(group.energy_tj, 4),
-      energy_toe: round(group.energy_toe, 2),
+      scope1: group.scope1 === null ? null : round(group.scope1, 3),
+      scope2: group.scope2 === null ? null : round(group.scope2, 3),
+      scope12: group.scope1 === null && group.scope2 === null ? null
+        : round((group.scope1 || 0) + (group.scope2 || 0), 3),
+      energy_tj: group.energy_tj === null ? null : round(group.energy_tj, 4),
+      energy_toe: group.energy_toe === null ? null : round(group.energy_toe, 2),
+      partial: { scope1: group.scope1 === null, scope2: group.scope2 === null,
+                 energy: group.energy_tj === null },
     },
     ratios,
     ratios_by_entity: ratiosByEntity,

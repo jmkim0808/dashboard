@@ -84,7 +84,9 @@ const ROUTES = { master: viewMaster, health: viewHealth };
 function defaultRoute() {
   const me = S.me;
   if (!me || !me.can) return 'health';
-  if (me.can.master) return 'master';
+  // 대표이사는 열면 바로 1페이지 현황이 보여야 한다 (R37)
+  if ((me.scopes || []).includes('executive')) return 'exec';
+  if (me.can.exec) return 'exec';
   if (me.can.input) {
     const entity = me.default_entity || 'HQ';
     return entity === 'HQ' ? 'input' : 'sheet';
@@ -159,11 +161,15 @@ function buildNav() {
     if (entity === 'HQ' || can.all_entities) links.push(['input', '내 입력']);
     links.push(['sheet', '월간 입력 시트']);
   }
+  // 네비는 주 흐름만 담는다. 연간 집계·마감 독촉은 각 화면 안에서 연결한다 —
+  // 상단 메뉴가 10개를 넘으면 아무도 전체를 읽지 않는다
+  if (can.exec) links.push(['exec', '경영진 현황']);
   if (can.board) links.push(['board', '입력 현황']);
   if (can.review) links.push(['review', '검증·승인']);
-  if (can.review) links.push(['year', '연간 집계']);
+  if (can.query) links.push(['query', '조회·근거']);
+  if (can.databook) links.push(['databook', '데이터북']);
   if (can.master) links.push(['master', '기준정보']);
-  links.push(['health', '시스템 상태']);
+  links.push(['health', '상태']);
 
   const hrefOf = (r) => r === 'sheet' ? `#/sheet/${entity}` : '#/' + r;
   setChildren(nav, links.map(([routeName, label]) => h('a', {

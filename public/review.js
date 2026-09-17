@@ -136,7 +136,11 @@ async function viewBoard(view) {
           class: 'chip' + (y === year ? ' on' : ''),
           href: '#/board/' + y + (RV.entity ? '/' + RV.entity : ''),
           text: String(y) + '년',
-        })))));
+        }))),
+      (S.me && S.me.can && S.me.can.review)
+        ? h('div', { class: 'chips' },
+            h('a', { class: 'chip', href: '#/digest/' + lastPeriod(), text: '마감 독촉 문구' }))
+        : null));
 
   setChildren(view, head,
     boardSummary(B),
@@ -514,7 +518,7 @@ function queueTable(Q) {
 }
 
 /** 미확보 사유 코드를 사람이 읽는 말로. 라벨이 없으면 코드를 그대로 보여준다 */
-function reasonLabel(code) {
+function vReasonLabel(code) {
   if (!code) return '';
   const map = (RV.queue && RV.queue.reason_labels) || {};
   return map[code] || code;
@@ -538,7 +542,7 @@ function queueRow(i, key) {
         i.entered_by_role ? [' · ', h('span', { class: 'role-code', text: i.entered_by_role })] : '')),
     h('td', { class: 'right num' },
       i.status === 'unavailable'
-        ? h('span', { class: 'badge unav', text: '미확보 · ' + reasonLabel(i.unavailable_reason_code) })
+        ? h('span', { class: 'badge unav', text: '미확보 · ' + vReasonLabel(i.unavailable_reason_code) })
         : [nf(i.value_raw, 3), h('span', { class: 'unit-pill sm', text: i.unit_raw || i.unit_standard })]),
     h('td', { class: 'right num' },
       i.prev_value === null ? h('span', { class: 'note', text: '기준 없음' }) : nf(i.prev_value, 3)),

@@ -141,6 +141,24 @@ check("같은 사업장·지표·기간 중복 저장 거부",
       rejects(conn, "INSERT INTO entry (entity_code, site_id, metric_code, period, value_raw, unit_raw, status) "
                     "VALUES ('SY',2,'E01','2026-09',999,'万kWh','entered')"))
 
+print("\n[12] 화면 파일 전역 이름 충돌 — 같은 이름이 있으면 나중 파일이 앞 파일을 덮는다")
+# public/*.js 는 모듈이 아니라 <script> 로 한 전역 스코프에 올라간다.
+# function 선언이 겹치면 오류 없이 뒤에 로드된 쪽이 이긴다. 덮인 화면은 조용히 틀리게 동작한다.
+# (실제로 review.js 의 reasonLabel 이 input.js 의 같은 이름 함수를 덮은 적이 있다)
+pub = os.path.join(os.path.dirname(HERE), "public")
+decl = re.compile(r"^(?:const|let|var|function|class)\s+([A-Za-z_$][A-Za-z0-9_$]*)", re.M)
+owners = {}
+clashes = []
+for fname in sorted(f for f in os.listdir(pub) if f.endswith(".js")):
+    src = open(os.path.join(pub, fname), encoding="utf-8").read()
+    for name in set(decl.findall(src)):
+        if name in owners:
+            clashes.append(f"{name}: {owners[name]} ↔ {fname}")
+        else:
+            owners[name] = fname
+check(f"전역 이름 충돌 없음 (검사한 이름 {len(owners)}개)", not clashes,
+      "\n        ".join(clashes))
+
 print(f"\n{'='*58}\n  통과 {ok} / 실패 {fail}\n{'='*58}")
 conn.close()
 sys.exit(1 if fail else 0)

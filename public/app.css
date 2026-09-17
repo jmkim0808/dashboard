@@ -430,3 +430,90 @@ tbody tr.total td { background: var(--shade); border-top: 2px solid var(--border
 td.nowrap, th.nowrap { white-space: nowrap; }
 td.act-col { white-space: nowrap; width: 1%; }
 .act-inline .chip { white-space: nowrap; min-height: 30px; padding: 0 10px; }
+
+/* ── 조회 · 드릴다운 (S6) ─────────────────────────────────── */
+
+.nav { flex-wrap: wrap; }
+
+/* "미산정"은 숫자가 아니다. 0 처럼 읽히지 않게 글꼴과 색을 바꾼다 */
+.unpriced {
+  font-family: 'IBM Plex Sans KR', sans-serif;
+  font-size: 11px; color: var(--ink-faint); font-weight: 500;
+}
+.flag-partial {
+  display: inline-block; padding: 2px 8px; border-radius: 5px;
+  background: var(--amber-soft); color: var(--amber-ink); font-size: 11px; font-weight: 600;
+}
+
+a.drill-link { color: var(--green); text-decoration: none; border-bottom: 1px dashed #a8c7b6; }
+a.drill-link:hover { background: var(--green-soft); }
+
+a.btn-a {
+  display: inline-flex; align-items: center; min-height: 38px; padding: 0 16px;
+  border-radius: 8px; background: var(--green); color: #fff;
+  font-size: 14px; font-weight: 600; text-decoration: none;
+}
+a.btn-a:hover { background: var(--green-ink); }
+
+/* 4단 근거 — 번호가 붙은 단계로 보여준다 (R55) */
+.step { display: flex; gap: 14px; padding: 14px 0; border-top: 1px solid var(--border-soft); }
+.step:first-of-type { border-top: none; }
+.step-n {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--dark); color: #fff; font-size: 13px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.step-body { flex-grow: 1; min-width: 0; }
+.step-title { font-size: 12px; font-weight: 700; color: var(--ink-soft); margin-bottom: 6px; }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+.fact { font-size: 13px; color: var(--ink-soft); }
+.fact b { color: var(--ink); }
+
+/* ── 경영진 화면 (S9) ─────────────────────────────────────── */
+
+/* 대표이사가 보는 한 줄. 이것만 읽고 나가도 되게 만든다 (R38) */
+.big-stat {
+  border: 1px solid var(--border); border-radius: 14px; padding: 24px 26px;
+  margin-bottom: 18px; background: var(--card);
+}
+.big-stat.ok   { background: var(--green-soft); border-color: #c5ddcf; }
+.big-stat.warn { background: var(--amber-soft); border-color: var(--amber-border); }
+.big-stat.bad  { background: var(--red-soft); border-color: var(--red-border); }
+.big-stat-label { font-size: 13px; color: var(--ink-soft); }
+.big-stat-value { margin: 6px 0 4px; font-size: 27px; font-weight: 700; line-height: 1.25; }
+.big-stat.ok .big-stat-value   { color: var(--green-ink); }
+.big-stat.warn .big-stat-value { color: var(--amber); }
+.big-stat.bad .big-stat-value  { color: var(--red); }
+.big-stat-sub { font-size: 13px; color: var(--ink-soft); margin-bottom: 12px; }
+
+.gauge { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 4px; }
+.gauge-num { font-size: 34px; font-weight: 700; line-height: 1; }
+.gauge-bar { height: 12px; border-radius: 6px; background: var(--shade); overflow: hidden; }
+.gauge-fill { height: 100%; background: var(--green); border-radius: 6px; }
+.gauge-sub { font-size: 12px; color: var(--ink-soft); }
+
+.light { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
+.light i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.light.green i { background: var(--green-bright); box-shadow: 0 0 0 3px #d8ecdf; }
+.light.amber i { background: #d49a45; box-shadow: 0 0 0 3px #f7ead7; }
+.light.red   i { background: #c25a5a; box-shadow: 0 0 0 3px #f5dcdc; }
+.light.gray  i { background: #b6bfba; box-shadow: 0 0 0 3px #e9ecea; }
+.light.green { color: var(--green-ink); }
+.light.amber { color: var(--amber-ink); }
+.light.red   { color: var(--red); }
+.light.gray  { color: var(--ink-faint); }
+
+@media (max-width: 720px) {
+  .big-stat-value { font-size: 22px; }
+  .gauge-num { font-size: 28px; }
+  .step { gap: 10px; }
+  a.btn-a { width: 100%; justify-content: center; }
+}
+
+/* 표 안의 보조 설명은 배경을 빼고 글자만 남긴다.
+   .hint 의 카드형 배경이 표 칸을 채우면 정상 행이 경고처럼 보인다 */
+td > .hint, td.hint {
+  background: none; border: none; padding: 0; margin: 0;
+  font-size: 12px; color: var(--ink-faint); line-height: 1.5;
+}
+td > .hint.fail { color: var(--red); }

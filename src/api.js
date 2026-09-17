@@ -28,6 +28,11 @@ import {
   closePeriod, reopenPeriod,
 } from './review.js';
 import { computeMonth, computeYear, saveMonthResult, latestFactorVersion } from './calc.js';
+import {
+  reportScope, loadQuery, loadDrill, loadDataBook, dataBookCsv,
+  createSubmission, listSubmissions, fetchSubmissionFile,
+  loadReadiness, loadDigest,
+} from './report.js';
 
 const ACCESS_EMAIL_HEADER = 'Cf-Access-Authenticated-User-Email';
 
@@ -38,6 +43,15 @@ const JSON_HEADERS = {
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body, null, 2), { status, headers: JSON_HEADERS });
+}
+
+/** "2025,2026" → [2025, 2026]. 잘못된 값이면 null — 조용히 기본값으로 넘어가지 않는다 */
+function parseYears(raw) {
+  if (!raw) return null;
+  const years = raw.split(',').map((x) => Number(x.trim()));
+  if (years.length === 0 || years.length > 5) return null;
+  if (years.some((y) => !Number.isInteger(y) || y < 2000 || y > 2100)) return null;
+  return [...new Set(years)].sort((a, b) => a - b);
 }
 
 /**
@@ -549,6 +563,7 @@ async function handleMe(request, env) {
   const isManager = scopes.some((s) => ['manager', 'approver', 'admin'].includes(s));
   const canInput = rows.results.some((r) => r.scope === 'entry') || isManager;
   const review = reviewScope(rows.results);
+  const report = reportScope(rows.results);
   return json({
     roles: effectiveRoles,
     unauthenticated_local: !identity.authenticated || undefined,
@@ -561,6 +576,11 @@ async function handleMe(request, env) {
       board: canInput,
       review: review.canApprove,
       close: review.canClose,
+      // 조회·드릴다운은 자기 법인 범위에서 담당자도 쓴다 (R55 역추적은 입력자에게도 필요하다)
+      query: canInput,
+      databook: isManager,
+      exec: isManager,
+      submit: report.canSubmit,
       all_entities: isManager,
     },
     entry_entities: entryEntities,
@@ -747,6 +767,112 @@ export default {
             return json({ ok: true, period, factor_version: version,
                           actor_role: actor, entities: out });
           }
+          return json({ error: 'not_found', path: url.pathname, method: request.method }, 404);
+        }
+
+        if (url.pathname.startsWith('/api/report')) {
+          const auth = await authorizeInput(request, env);
+          if (auth.error) return auth.error;
+          const { rows, scope, actor } = auth;
+          const report = reportScope(rows);
+          const version = url.searchParams.get('version') || await latestFactorVersion(env);
+          if (!version) {
+            return json({ error: 'no_factors',
+              hint: '배출계수가 등록되지 않았습니다. 기준정보 → 배출계수에서 등록하세요.' }, 409);
+          }
+
+          // 조회 — 자기 법인만. 총괄은 전 법인
+          if (url.pathname === '/api/report/query' && request.method === 'GET') {
+            const from = url.searchParams.get('from');
+            const to = url.searchParams.get('to');
+            if (!isValidPeriod(from || '') || !isValidPeriod(to || '') || from > to) {
+              return json({ error: 'invalid_range',
+                hint: 'from · to 를 YYYY-MM 으로, from ≤ to 로 주세요.' }, 400);
+            }
+            const asked = (url.searchParams.get('entity') || '').split(',').filter(Boolean);
+            const allowed = scope.isManager ? null : (scope.entities || []);
+            let codes = asked;
+            if (allowed) {
+              codes = codes.filter((c) => allowed.includes(c));
+              if (codes.length === 0) codes = allowed;
+            }
+            if (codes.length === 0) {
+              codes = (await env.DB.prepare(
+                `SELECT code FROM entity WHERE is_active = 1 ORDER BY code`).all())
+                .results.map((e) => e.code);
+            }
+            const q = await loadQuery(env, { entityCodes: codes, from, to, version });
+            if (q.error) return json(q, 400);
+            return json({ ...q, can_submit: report.canSubmit, scoped: !!allowed });
+          }
+
+          // 드릴다운 — 결과 → 계수 → 입력값 → 증빙 (R55)
+          if (url.pathname === '/api/report/drill' && request.method === 'GET') {
+            const entityCode = url.searchParams.get('entity');
+            const period = url.searchParams.get('period');
+            const metricCode = url.searchParams.get('metric');
+            if (!entityCode || !metricCode || !isValidPeriod(period || '')) {
+              return json({ error: 'invalid_params' }, 400);
+            }
+            if (!scope.isManager && !(scope.entities || []).includes(entityCode)) {
+              return json({ error: 'forbidden_entity' }, 403);
+            }
+            const d = await loadDrill(env, entityCode, period, metricCode, version);
+            if (d.error) return json(d, 404);
+            return json(d);
+          }
+
+          // 데이터북 이하는 전 법인을 합산하므로 총괄 이상만 본다 (R62)
+          if (!scope.isManager) {
+            return json({ error: 'forbidden',
+              hint: '데이터북·경영진 화면은 3법인 합산값이므로 본사 총괄·승인자만 사용합니다.' }, 403);
+          }
+
+          if (url.pathname === '/api/report/databook' && request.method === 'GET') {
+            const years = parseYears(url.searchParams.get('years'));
+            if (!years) return json({ error: 'invalid_years',
+              hint: 'years=2025,2026 형태로 최대 5개년까지 지정하세요.' }, 400);
+            const disclosure = url.searchParams.get('disclosure') || null;
+            const book = await loadDataBook(env, years, { disclosure, version });
+            if (book.error) return json(book, 400);
+            if (url.searchParams.get('format') === 'csv') {
+              return new Response(dataBookCsv(book), { headers: {
+                'content-type': 'text/csv; charset=utf-8',
+                'content-disposition': `attachment; filename="esg-databook-${years.join('_')}.csv"`,
+                'cache-control': 'no-store',
+              } });
+            }
+            return json({ ...book, can_submit: report.canSubmit });
+          }
+
+          if (url.pathname === '/api/report/readiness' && request.method === 'GET') {
+            const years = parseYears(url.searchParams.get('years')) || [2025, 2026];
+            const period = url.searchParams.get('period');
+            if (!isValidPeriod(period || '')) return json({ error: 'invalid_period' }, 400);
+            return json(await loadReadiness(env, { reportYears: years, period, version }));
+          }
+
+          if (url.pathname === '/api/report/digest' && request.method === 'GET') {
+            const period = url.searchParams.get('period');
+            if (!isValidPeriod(period || '')) return json({ error: 'invalid_period' }, 400);
+            return json(await loadDigest(env, period));
+          }
+
+          if (url.pathname === '/api/report/submission' && request.method === 'GET') {
+            const key = url.searchParams.get('key');
+            if (key) {
+              const f = await fetchSubmissionFile(env, key);
+              if (f.status !== 200) return json({ error: 'not_found_or_forbidden' }, f.status);
+              return new Response(f.stream, { headers: f.headers });
+            }
+            return json(await listSubmissions(env));
+          }
+          if (url.pathname === '/api/report/submission' && request.method === 'POST') {
+            const body = await request.json().catch(() => ({}));
+            const r = await createSubmission(env, body, report, actor);
+            return json(r.body, r.status);
+          }
+
           return json({ error: 'not_found', path: url.pathname, method: request.method }, 404);
         }
 

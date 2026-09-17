@@ -23,6 +23,9 @@ G3 게이트 — 산정값 검산.
     TOE        = TJ × 1000 ÷ 41.868
     비율지표   = (Σ분자 ÷ Σ분모) × 배수             (R64 — 법인별 값의 평균이 아니다)
     금액 분모  = Σ(법인 현지통화 금액 × 연평균환율)   (R65)
+
+  계수가 없어 산정하지 못한 스코프는 0 이 아니라 None 이다.
+  0 으로 내려가면 보고서에 "직접배출 없음"으로 찍히고, 확인한 적 없는 사실이 공시된다.
 """
 import json, os, sqlite3, sys, urllib.request, glob, argparse
 
@@ -41,7 +44,7 @@ ok = fail = 0
 def check(name, got, want, tol=0.0005):
     global ok, fail
     if want is None or got is None:
-        good = (want is None and got is None)
+        good = (want is None and got is None)   # 미산정은 0 과 같지 않다
     else:
         good = abs(got - want) <= max(tol, abs(want) * 1e-6)
     if good:
@@ -75,7 +78,7 @@ periods = [f"{YEAR}-{m:02d}" for m in range(1, 13)]
 
 entities = {e['code']: e for e in q("SELECT code, currency, grid_region FROM entity WHERE is_active=1")}
 sites = {s['entity_code']: s for s in q("SELECT entity_code, ownership, allocation_ratio FROM site WHERE is_active=1")}
-metrics = {m['code']: m for m in q("SELECT code, unit_standard, aggregation, factor_type, ghg_scope, is_calculated FROM metric")}
+metrics = {m['code']: m for m in q("SELECT code, category, unit_standard, aggregation, factor_type, ghg_scope, is_calculated FROM metric")}
 overrides = {(o['metric_code'], o['entity_code']): o['factor_to_standard']
              for o in q("SELECT metric_code, entity_code, factor_to_standard FROM metric_unit_override")}
 entries = q(f"SELECT entity_code, metric_code, period, value_raw, status FROM entry "
@@ -99,9 +102,12 @@ def factor(ftype, purpose, region):
     return None
 
 def allocated(entity, metric_code, value):
+    """원본 × 단위환산 × 배분율. 배분은 임대 사업장의 환경(E) 물량에만 적용한다 (R61)."""
     std = value * overrides.get((metric_code, entity), 1.0)
     s = sites[entity]
-    return std * (s['allocation_ratio'] if s['ownership'] == 'leased' and s['allocation_ratio'] else 1.0)
+    leased = s['ownership'] == 'leased' and s['allocation_ratio']
+    is_env = metrics[metric_code]['category'] == 'E'
+    return std * (s['allocation_ratio'] if leased and is_env else 1.0)
 
 # ── 월별 산정 검산 ──────────────────────────────────────────────────────────
 print(f"\n[1] 월별 배출량·에너지 — 입력값에서 손계산으로 다시 만든다 ({YEAR})")
@@ -109,6 +115,8 @@ monthly = {}
 for code, e in entities.items():
     for period in periods:
         s1 = s2 = tj = 0.0
+        # 계수가 있어 실제로 합산된 항목 수. 0 이면 그 스코프는 미산정(None)이다
+        n1 = n2 = ntj = 0
         rows = [r for r in entries if r['entity_code'] == code and r['period'] == period]
         if not rows:
             continue
@@ -120,13 +128,15 @@ for code, e in entities.items():
             ef = factor(m['factor_type'], 'emission', e['grid_region'])
             hv = factor(m['factor_type'], 'heating_value', e['grid_region'])
             if ef and m['ghg_scope']:
-                if m['ghg_scope'] == 1: s1 += a * ef
-                else: s2 += a * ef
+                if m['ghg_scope'] == 1: s1 += a * ef; n1 += 1
+                else: s2 += a * ef; n2 += 1
             if hv:
-                tj += a * hv
+                tj += a * hv; ntj += 1
         monthly[(code, period)] = {
-            'scope1': round(s1, 4), 'scope2': round(s2, 4),
-            'energy_tj': round(tj, 6), 'energy_toe': round(tj * 1000 / GJ_PER_TOE, 3)}
+            'scope1': round(s1, 4) if n1 else None,
+            'scope2': round(s2, 4) if n2 else None,
+            'energy_tj': round(tj, 6) if ntj else None,
+            'energy_toe': round(tj * 1000 / GJ_PER_TOE, 3) if ntj else None}
 
 checked = 0
 for (code, period), want in sorted(monthly.items()):
@@ -139,18 +149,22 @@ print(f"        검산한 법인·월 조합: {checked}")
 # ── 연간 합산 검산 ──────────────────────────────────────────────────────────
 print(f"\n[2] 연간 합산 — 월별 산출값의 합이어야 한다 (보고서 수치와 월 보고가 어긋나면 안 된다)")
 year = api('/api/calc/year?year=%d' % YEAR)
-grp = {'scope1': 0.0, 'scope2': 0.0, 'energy_tj': 0.0, 'energy_toe': 0.0}
+KEYS = ('scope1', 'scope2', 'energy_tj', 'energy_toe')
+DIGITS = {'scope1': 3, 'scope2': 3, 'energy_tj': 4, 'energy_toe': 2}
+grp = {k: None for k in KEYS}
 for e in year['entities']:
     code = e['entity_code']
-    want = {k: round(sum(v[k] for (c, p), v in monthly.items() if c == code),
-                     3 if k.startswith('scope') else (4 if k == 'energy_tj' else 2))
-            for k in grp}
-    for k in grp:
+    want = {}
+    for k in KEYS:
+        vals = [v[k] for (c, p), v in monthly.items() if c == code and v[k] is not None]
+        want[k] = round(sum(vals), DIGITS[k]) if vals else None
+    for k in KEYS:
         check(f"{code} 연간 {k}", e[k], want[k])
-        grp[k] += want[k]
-for k in grp:
+        if want[k] is not None:
+            grp[k] = (grp[k] or 0) + want[k]
+for k in KEYS:
     check(f"그룹 합산 {k}", year['group'][k],
-          round(grp[k], 3 if k.startswith('scope') else (4 if k == 'energy_tj' else 2)))
+          None if grp[k] is None else round(grp[k], DIGITS[k]))
 
 # ── 비율·집약도 검산 (R64) ──────────────────────────────────────────────────
 print(f"\n[3] 비율·집약도 — 분자·분모를 각각 합산한 뒤 나눈다 (R64)")
@@ -159,12 +173,17 @@ calc_annual = {e['entity_code']: {'E-C1': e['energy_tj'], 'E-C2': e['energy_toe'
                for e in year['entities']}
 
 def annual(code, metric_code):
-    """한 법인·한 지표의 연간값. metric.aggregation 정의대로."""
+    """한 법인·한 지표의 연간값. metric.aggregation 정의대로.
+
+    값은 원본이 아니라 '단위환산 × 배분' 을 적용한 값이다 (allocated()).
+    지금은 비율지표의 원천이 모두 비환경·단위오버라이드 없는 항목이라 차이가 없지만,
+    나중에 그런 항목이 분자·분모에 들어오면 이 검산이 바로 잡아낸다.
+    """
     if metric_code in calc_annual.get(code, {}):
         return calc_annual[code][metric_code]
     m = metrics.get(metric_code)
     if not m: return None
-    vals = [(r['period'], r['value_raw']) for r in entries
+    vals = [(r['period'], allocated(code, metric_code, r['value_raw'])) for r in entries
             if r['entity_code'] == code and r['metric_code'] == metric_code]
     if not vals: return None
     if m['aggregation'] == 'avg': return sum(v for _, v in vals) / len(vals)
