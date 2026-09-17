@@ -12,7 +12,8 @@
     "db:remote": "wrangler d1 execute powernet-esg --remote --file=db/schema.sql && wrangler d1 execute powernet-esg --remote --file=db/seed.sql",
     "db:factors:remote": "wrangler d1 execute powernet-esg --remote --file=db/factors.sql",
     "db:count": "wrangler d1 execute powernet-esg --local --command=\"SELECT entity_code, COUNT(*) AS monthly FROM v_expected_entry WHERE period_type='monthly' GROUP BY 1\"",
-    "verify": "python3 db/verify.py"
+    "verify": "python3 db/verify.py",
+    "g3": "python3 db/g3.py --base http://127.0.0.1:8787"
   },
   "devDependencies": {
     "wrangler": "^4.133.0"

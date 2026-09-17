@@ -172,7 +172,10 @@ export async function loadSheet(env, entityCode, period, scope) {
       status: row ? row.status : 'empty',
       unavailable_reason_code: row ? row.unavailable_reason_code : null,
       return_reason: row ? row.return_reason : null,
-      locked: !!(row && (row.status === 'approved' || row.status === 'closed')),
+      locked: !!(row && (row.approved_at || row.closed_at
+                         || row.status === 'approved' || row.status === 'closed')),
+      approved_at: row ? row.approved_at : null,
+      closed_at: row ? row.closed_at : null,
       evidence_count: row ? row.evidence_count : 0,
       ai_suggested_value: row ? row.ai_suggested_value : null,
       prev_period: prevPeriod,
@@ -251,10 +254,14 @@ export async function saveEntry(env, body, scope, actorRole) {
   }
 
   const existing = await env.DB.prepare(
-    `SELECT id, status, value_raw FROM entry WHERE site_id = ? AND metric_code = ? AND period = ?`
+    `SELECT id, status, value_raw, approved_at, closed_at FROM entry
+      WHERE site_id = ? AND metric_code = ? AND period = ?`
   ).bind(meta.site_id, metric_code, period).first();
 
-  if (existing && (existing.status === 'approved' || existing.status === 'closed')) {
+  // 미확보 항목은 승인돼도 status 가 unavailable 로 남는다(review.js 참조).
+  // 따라서 잠금 판단은 status 가 아니라 승인·확정 시각으로 한다.
+  if (existing && (existing.approved_at || existing.closed_at
+                   || existing.status === 'approved' || existing.status === 'closed')) {
     return { status: 409, body: { error: 'locked',
       hint: '이미 승인·확정된 항목입니다. 수정이 필요하면 총괄에게 요청하세요.' } };
   }

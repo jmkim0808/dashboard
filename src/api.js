@@ -23,6 +23,11 @@ import {
   loadSheet, saveEntry, submitSheet, uploadEvidence, fetchEvidence,
   inputScope, isValidPeriod,
 } from './entry.js';
+import {
+  reviewScope, loadBoard, loadQueue, approveEntries, returnEntry,
+  closePeriod, reopenPeriod,
+} from './review.js';
+import { computeMonth, computeYear, saveMonthResult, latestFactorVersion } from './calc.js';
 
 const ACCESS_EMAIL_HEADER = 'Cf-Access-Authenticated-User-Email';
 
@@ -513,11 +518,17 @@ async function handleMe(request, env) {
   if (!identity.authenticated && required) {
     return json({ error: 'unauthenticated', hint: 'Cloudflare Access 로그인이 필요합니다.' }, 401);
   }
-  if (identity.roles.length === 0) {
-    return json({ roles: [], assignments: [], hint: '이 계정에 역할이 매핑되지 않았습니다.' }, 200);
+  // REQUIRE_ACCESS=false 인 로컬 확인 상태. authorizeInput 과 같은 역할을 가정해야
+  // 화면과 API 권한이 어긋나지 않는다.
+  const effectiveRoles = identity.authenticated ? identity.roles : ['HQ_ESG'];
+  if (effectiveRoles.length === 0) {
+    return json({ roles: [], assignments: [], scopes: [],
+      can: { master: false, input: false, board: false, review: false, close: false,
+             all_entities: false },
+      hint: '이 계정에 역할이 매핑되지 않았습니다.' }, 200);
   }
 
-  const placeholders = identity.roles.map(() => '?').join(',');
+  const placeholders = effectiveRoles.map(() => '?').join(',');
   const rows = await env.DB.prepare(
     `SELECT r.code        AS role_code,
             r.label_ko    AS role_label,
@@ -531,18 +542,25 @@ async function handleMe(request, env) {
        FROM role r
       WHERE r.code IN (${placeholders}) AND r.is_active = 1
       ORDER BY r.code`
-  ).bind(...identity.roles).all();
+  ).bind(...effectiveRoles).all();
 
   const scopes = [...new Set(rows.results.map((r) => r.scope))];
   const entryEntities = [...new Set(rows.results.filter((r) => r.scope === 'entry').map((r) => r.entity_code))];
   const isManager = scopes.some((s) => ['manager', 'approver', 'admin'].includes(s));
+  const canInput = rows.results.some((r) => r.scope === 'entry') || isManager;
+  const review = reviewScope(rows.results);
   return json({
-    roles: identity.roles,
+    roles: effectiveRoles,
+    unauthenticated_local: !identity.authenticated || undefined,
     assignments: rows.results,
     scopes,
     can: {
       master: isManager,
-      input: rows.results.some((r) => r.scope === 'entry') || isManager,
+      input: canInput,
+      // 현황 보드는 입력 담당자도 본다 — 자기 법인의 빈칸을 스스로 보게 한다 (P-4)
+      board: canInput,
+      review: review.canApprove,
+      close: review.canClose,
       all_entities: isManager,
     },
     entry_entities: entryEntities,
@@ -602,6 +620,132 @@ export default {
             const r = await fetchEvidence(env, key, scope);
             if (r.status !== 200) return json({ error: 'not_found_or_forbidden' }, r.status);
             return new Response(r.stream, { headers: r.headers });
+          }
+          return json({ error: 'not_found', path: url.pathname, method: request.method }, 404);
+        }
+
+        if (url.pathname.startsWith('/api/review')) {
+          const auth = await authorizeInput(request, env);
+          if (auth.error) return auth.error;
+          const { rows, scope, actor } = auth;
+          const review = reviewScope(rows);
+          const body = ['POST', 'PATCH', 'PUT'].includes(request.method)
+            ? await request.json().catch(() => ({}))
+            : null;
+
+          // 현황 보드는 입력 담당자도 본다 — 자기 법인의 빈칸을 스스로 보게 하는 것이 목적이다 (P-4)
+          if (url.pathname === '/api/review/board' && request.method === 'GET') {
+            const year = Number(url.searchParams.get('year'));
+            if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+              return json({ error: 'invalid_year' }, 400);
+            }
+            let entityCode = url.searchParams.get('entity') || null;
+            let allowed = null;            // null = 전 법인
+            if (!scope.isManager) {
+              const mine = scope.entities || [];
+              if (mine.length === 0) return json({ error: 'forbidden_entity' }, 403);
+              // 입력 담당자는 자기 법인만 본다. 다른 법인을 요청하면 자기 법인으로 되돌린다
+              if (!entityCode || !mine.includes(entityCode)) entityCode = mine[0];
+              allowed = mine;
+            }
+            const board = await loadBoard(env, year, entityCode, allowed);
+            if (board.error) return json(board, 404);
+            return json({ ...board, can_approve: review.canApprove, can_close: review.canClose });
+          }
+
+          // 승인 큐부터는 검토 권한이 필요하다
+          if (!review.canApprove) {
+            return json({ error: 'forbidden',
+              hint: '검증·승인 화면은 본사 ESG 총괄·파트장만 사용합니다.' }, 403);
+          }
+
+          if (url.pathname === '/api/review/queue' && request.method === 'GET') {
+            const period = url.searchParams.get('period');
+            if (period && !isValidPeriod(period)) return json({ error: 'invalid_period' }, 400);
+            const q = await loadQueue(env, {
+              entityCode: url.searchParams.get('entity') || null,
+              period: period || null,
+            });
+            return json({ ...q, can_close: review.canClose });
+          }
+          if (url.pathname === '/api/review/approve' && request.method === 'POST') {
+            const r = await approveEntries(env, body, review, actor);
+            return json(r.body, r.status);
+          }
+          if (url.pathname === '/api/review/return' && request.method === 'POST') {
+            const r = await returnEntry(env, body, review, actor);
+            return json(r.body, r.status);
+          }
+          if (url.pathname === '/api/review/close' && request.method === 'POST') {
+            const r = await closePeriod(env, body, review, actor);
+            return json(r.body, r.status);
+          }
+          if (url.pathname === '/api/review/reopen' && request.method === 'POST') {
+            const r = await reopenPeriod(env, body, review, actor);
+            return json(r.body, r.status);
+          }
+          return json({ error: 'not_found', path: url.pathname, method: request.method }, 404);
+        }
+
+        if (url.pathname.startsWith('/api/calc')) {
+          const auth = await authorizeInput(request, env);
+          if (auth.error) return auth.error;
+          const { scope, actor } = auth;
+          const version = url.searchParams.get('version')
+            || await latestFactorVersion(env);
+          if (!version) {
+            return json({ error: 'no_factors',
+              hint: '배출계수가 등록되지 않았습니다. 기준정보 → 배출계수에서 등록하세요.' }, 409);
+          }
+
+          if (url.pathname === '/api/calc/month' && request.method === 'GET') {
+            const entityCode = url.searchParams.get('entity');
+            const period = url.searchParams.get('period');
+            if (!entityCode || !period || !isValidPeriod(period)) {
+              return json({ error: 'invalid_params',
+                hint: 'entity 와 period(YYYY-MM) 가 필요합니다.' }, 400);
+            }
+            if (!scope.isManager && !(scope.entities || []).includes(entityCode)) {
+              return json({ error: 'forbidden_entity' }, 403);
+            }
+            const c = await computeMonth(env, entityCode, period, version);
+            if (c.error) return json(c, 404);
+            return json(c);
+          }
+
+          // 재산정·저장과 그룹 합산은 총괄 이상만 한다
+          if (!scope.isManager) {
+            return json({ error: 'forbidden',
+              hint: '산정 실행과 그룹 합산은 본사 총괄·승인자만 사용합니다.' }, 403);
+          }
+
+          if (url.pathname === '/api/calc/year' && request.method === 'GET') {
+            const year = Number(url.searchParams.get('year'));
+            if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+              return json({ error: 'invalid_year' }, 400);
+            }
+            return json(await computeYear(env, year, version));
+          }
+          if (url.pathname === '/api/calc/run' && request.method === 'POST') {
+            const body = await request.json().catch(() => ({}));
+            const period = body.period;
+            if (!isValidPeriod(period || '')) return json({ error: 'invalid_period' }, 400);
+            const entities = body.entity_code
+              ? [body.entity_code]
+              : (await env.DB.prepare(
+                  `SELECT code FROM entity WHERE is_active = 1 ORDER BY code`).all())
+                  .results.map((e) => e.code);
+            const out = [];
+            for (const code of entities) {
+              const c = await computeMonth(env, code, period, version);
+              if (c.error) { out.push({ entity_code: code, error: c.error }); continue; }
+              const saved = await saveMonthResult(env, c);
+              out.push({ entity_code: code, results: c.results,
+                         unpriced: c.unpriced.length, excluded: c.excluded.length,
+                         pending_approval: c.pending_approval, saved_metrics: saved });
+            }
+            return json({ ok: true, period, factor_version: version,
+                          actor_role: actor, entities: out });
           }
           return json({ error: 'not_found', path: url.pathname, method: request.method }, 404);
         }

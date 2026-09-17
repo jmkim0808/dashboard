@@ -159,12 +159,15 @@ function buildNav() {
     if (entity === 'HQ' || can.all_entities) links.push(['input', '내 입력']);
     links.push(['sheet', '월간 입력 시트']);
   }
+  if (can.board) links.push(['board', '입력 현황']);
+  if (can.review) links.push(['review', '검증·승인']);
+  if (can.review) links.push(['year', '연간 집계']);
   if (can.master) links.push(['master', '기준정보']);
   links.push(['health', '시스템 상태']);
 
+  const hrefOf = (r) => r === 'sheet' ? `#/sheet/${entity}` : '#/' + r;
   setChildren(nav, links.map(([routeName, label]) => h('a', {
-    href: routeName === 'sheet' ? `#/sheet/${entity}` : '#/' + routeName,
-    'data-route': routeName, text: label,
+    href: hrefOf(routeName), 'data-route': routeName, text: label,
   })));
 }
 
