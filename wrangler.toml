@@ -28,3 +28,7 @@ bucket_name = "powernet-esg-evidence"
 [vars]
 APP_NAME = "POWERNET ESG"
 FACTOR_VERSION = "v2026.1"
+
+# Cloudflare Access 통과를 강제한다. 최초 배포 확인 시에만 임시로 "false" 로 두고,
+# Access Application 설정 직후 반드시 "true" 로 되돌린다. (SETUP.md 4단계)
+REQUIRE_ACCESS = "true"

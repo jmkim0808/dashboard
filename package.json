@@ -1,0 +1,18 @@
+{
+  "name": "powernet-esg",
+  "version": "0.1.0",
+  "private": true,
+  "description": "파워넷 ESG 데이터 입력플랫폼 (3법인 통합)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "wrangler deploy --dry-run",
+    "db:local": "wrangler d1 execute powernet-esg --local --file=db/schema.sql && wrangler d1 execute powernet-esg --local --file=db/seed.sql",
+    "db:remote": "wrangler d1 execute powernet-esg --remote --file=db/schema.sql && wrangler d1 execute powernet-esg --remote --file=db/seed.sql",
+    "db:count": "wrangler d1 execute powernet-esg --local --command=\"SELECT entity_code, COUNT(*) AS monthly FROM v_expected_entry WHERE period_type='monthly' GROUP BY 1\"",
+    "verify": "python3 db/verify.py"
+  },
+  "devDependencies": {
+    "wrangler": "^4.133.0"
+  }
+}

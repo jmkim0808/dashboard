@@ -1,0 +1,10 @@
+node_modules/
+.wrangler/
+dist/
+
+# 로컬 개발용 환경변수. ROLE_MAP(이메일 ↔ 역할 매핑)이 들어가므로
+# 절대 커밋하지 않는다. 운영 값은 wrangler secret 으로만 관리한다. (R84/R85)
+.dev.vars
+
+.DS_Store
+*.log

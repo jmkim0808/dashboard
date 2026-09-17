@@ -1,0 +1,11 @@
+# 로컬 개발용 환경변수 예시.
+# 이 파일을 .dev.vars 로 복사해서 실제 값을 넣는다. .dev.vars 는 커밋되지 않는다.
+#
+# ROLE_MAP: 이메일 -> 역할코드 배열.
+#   이 매핑은 여기(그리고 운영에서는 wrangler secret)에만 존재하며 데이터베이스에 저장되지 않는다.
+#   Worker 는 이메일을 역할코드로 바꾼 직후 버리고, 응답·로그·DB 어디에도 남기지 않는다. (R84/R85)
+#   해외법인 부담당자 인력 여력이 없으면 본사 총괄 담당자 이메일을 SY_BACKUP / VP_BACKUP 에 함께 넣는다.
+ROLE_MAP={"lead@powernet.co.kr":["HQ_LEAD","HQ_ADMIN"],"esg@powernet.co.kr":["HQ_ESG","SY_BACKUP","VP_BACKUP"],"facility@powernet.co.kr":["HQ_FACILITY"],"hr@powernet.co.kr":["HQ_HR"],"safety@powernet.co.kr":["HQ_SAFETY"],"prod@powernet.co.kr":["HQ_PROD"],"proc@powernet.co.kr":["HQ_PROC"],"ceo@powernet.co.kr":["HQ_EXEC"],"sy.ga@powernet.com.cn":["SY_OWNER"],"vp.ga@powernet.com.vn":["VP_OWNER"]}
+
+# 최초 배포 확인 시에만 false. Access 설정 후 반드시 지우거나 true 로 되돌린다.
+REQUIRE_ACCESS=true
