@@ -8,7 +8,9 @@
     "deploy": "wrangler deploy",
     "check": "wrangler deploy --dry-run",
     "db:local": "wrangler d1 execute powernet-esg --local --file=db/schema.sql && wrangler d1 execute powernet-esg --local --file=db/seed.sql",
+    "db:factors": "wrangler d1 execute powernet-esg --local --file=db/factors.sql",
     "db:remote": "wrangler d1 execute powernet-esg --remote --file=db/schema.sql && wrangler d1 execute powernet-esg --remote --file=db/seed.sql",
+    "db:factors:remote": "wrangler d1 execute powernet-esg --remote --file=db/factors.sql",
     "db:count": "wrangler d1 execute powernet-esg --local --command=\"SELECT entity_code, COUNT(*) AS monthly FROM v_expected_entry WHERE period_type='monthly' GROUP BY 1\"",
     "verify": "python3 db/verify.py"
   },

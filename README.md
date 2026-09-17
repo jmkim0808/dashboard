@@ -24,8 +24,9 @@
 |---|---|---|
 | 🔴 빈푹 법인 온실가스 보고 의무 대상 여부 | 09-26 | `docs/planning/ep02-trigger.md` 2절 |
 | 🔴 법인별·항목별 확보 가능 최초 연도 조사 | 09-30 | `db/README.md` |
-| 🔴 3개 지역 전력 배출계수 공식 고시값 | 09-30 | 산정 로직(W3) 전까지 |
-| 적용 GWP 버전 (AR5 / AR6) | 09-26 | |
+| ~~3개 지역 전력 배출계수~~ | ✅ 완료 | 한국 0.4173 · 중국 0.5306 · 베트남 0.6592 (`db/factors.sql`) |
+| ~~적용 GWP 버전~~ | ✅ 완료 | **IPCC AR6** 채택 (CH4 27.9 · N2O 273) |
+| Scope 1 연료 배출계수 (도시가스·경유·LPG·휘발유) | W3 전까지 | IPCC 2006 원문 확인 후. 전력만으로도 산정·검산 가능 |
 | 3법인 회계연도 시작월 | 09-24 | |
 | 본사 임대 사업장 배분율·근거 | 09-26 | 현재 0.342 가정값 |
 | 법인별 해당 없는 항목 식별 | 09-30 | 기준정보 화면에서 "적용" 해제 |
@@ -56,6 +57,7 @@
 wrangler.toml       배포 설정 (D1 · R2 바인딩)
 db/schema.sql       테이블 15 · 트리거 7 · 뷰 3
 db/seed.sql         기준정보 — 법인 3 · 역할 13 · 지표 49 · 담당배정 111
+db/factors.sql      배출계수 — 계수 정책 + 3개 지역 전력 배출계수
 db/verify.py        제약 검증 23항목
 src/api.js          Worker — 라우팅 · 인증 · 기준정보 API
 src/entry.js        입력값 처리 — 시트 조회 · 저장 · 증빙 업로드
@@ -81,7 +83,9 @@ public/app.css      스타일
 | `npm run check` | 설정 검증 (배포 안 함) |
 | `npm run deploy` | 운영 배포 |
 | `npm run db:local` | 로컬 DB에 스키마·기준정보 적용 |
+| `npm run db:factors` | 로컬 DB에 배출계수 적용 |
 | `npm run db:remote` | 운영 DB에 적용 |
+| `npm run db:factors:remote` | 운영 DB에 배출계수 적용 |
 | `npm run db:count` | 법인별 월간 항목 수 확인 |
 | `npm run verify` | 제약 검증 (23항목) |
 | `npx wrangler tail` | 운영 로그 실시간 보기 |
