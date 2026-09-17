@@ -3,263 +3,30 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>POWERNET ESG — 배포 확인</title>
+<title>POWERNET ESG</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
-<style>
-  :root {
-    --bg: #f7f8f5; --card: #ffffff; --border: #dde3df;
-    --ink: #16302f; --ink-soft: #4e615c; --ink-faint: #8a9a93;
-    --dark: #0e2623; --green: #1f6b4a; --green-soft: #eaf2ed; --green-ink: #1a5c40;
-    --amber: #9a5a18; --amber-soft: #fbf3e9; --amber-border: #e8d5bc;
-    --red: #9b2f2f; --red-soft: #fbeeee; --red-border: #e8c9c9;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font-family: 'IBM Plex Sans KR', 'IBM Plex Sans', system-ui, sans-serif;
-    -webkit-font-smoothing: antialiased; line-height: 1.5;
-  }
-  .num { font-family: 'IBM Plex Sans', monospace; font-variant-numeric: tabular-nums; }
-  header { background: var(--dark); color: #f2f5f1; padding: 28px 24px; }
-  .wrap { max-width: 880px; margin: 0 auto; }
-  .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 2px; color: #5fbf91; }
-  h1 { margin: 8px 0 6px; font-size: 26px; font-weight: 600; letter-spacing: -.2px; }
-  header p { margin: 0; font-size: 14px; color: #9fb7ae; }
-  main { padding: 24px; }
-  .banner { border-radius: 12px; padding: 20px 22px; margin-bottom: 20px; border: 1px solid transparent; }
-  .banner h2 { margin: 0 0 6px; font-size: 20px; font-weight: 600; }
-  .banner p { margin: 0; font-size: 14px; }
-  .banner.ok   { background: var(--green-soft); border-color: #c5ddcf; color: var(--green-ink); }
-  .banner.warn { background: var(--amber-soft); border-color: var(--amber-border); color: var(--amber); }
-  .banner.fail { background: var(--red-soft);   border-color: var(--red-border);   color: var(--red); }
-  .banner.load { background: var(--card); border-color: var(--border); color: var(--ink-soft); }
-  .card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 18px 20px; margin-bottom: 12px;
-  }
-  .card-top { display: flex; align-items: center; gap: 10px; }
-  .dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
-  .dot.ok { background: var(--green); } .dot.warn { background: #c98a3e; }
-  .dot.fail { background: var(--red); } .dot.load { background: #c0cac4; }
-  .card-title { font-size: 16px; font-weight: 600; }
-  .badge {
-    margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: .5px;
-    padding: 3px 9px; border-radius: 20px; background: #eff2ed; color: var(--ink-soft);
-  }
-  .badge.ok { background: var(--green-soft); color: var(--green-ink); }
-  .badge.warn { background: #fbf0e2; color: #7a4a14; }
-  .badge.fail { background: var(--red-soft); color: var(--red); }
-  .facts { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
-  .fact { font-size: 13px; color: var(--ink-soft); }
-  .fact b { color: var(--ink); font-weight: 600; }
-  .hint {
-    margin-top: 12px; padding: 12px 14px; border-radius: 8px;
-    background: var(--amber-soft); border: 1px solid var(--amber-border);
-    font-size: 13px; color: #7a4a14; line-height: 1.6;
-  }
-  .hint.fail { background: var(--red-soft); border-color: var(--red-border); color: var(--red); }
-  pre {
-    margin: 10px 0 0; padding: 12px 14px; border-radius: 8px; background: #f2f4f1;
-    border: 1px solid var(--border); font-size: 12px; color: var(--ink-soft);
-    overflow-x: auto; white-space: pre-wrap; word-break: break-all;
-    font-family: 'IBM Plex Sans', monospace;
-  }
-  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-         padding: 11px 0; border-bottom: 1px solid #f0f2ef; font-size: 14px; }
-  .row:last-child { border-bottom: none; }
-  .role-code { font-family: 'IBM Plex Sans', monospace; font-size: 12px; color: var(--ink-faint); }
-  button {
-    font-family: inherit; min-height: 44px; padding: 0 20px; border-radius: 8px;
-    border: 1px solid var(--dark); background: var(--dark); color: #fff;
-    font-size: 14px; font-weight: 600; cursor: pointer;
-  }
-  button.ghost { background: var(--card); color: var(--ink); border-color: #c6d0ca; }
-  .actions { display: flex; gap: 10px; margin: 20px 0 8px; }
-  .note { font-size: 12px; color: var(--ink-faint); line-height: 1.7; }
-  h3 { margin: 26px 0 10px; font-size: 15px; font-weight: 600; color: var(--ink-soft); letter-spacing: .3px; }
-  footer { padding: 8px 24px 40px; }
-</style>
+<link rel="stylesheet" href="/app.css">
 </head>
 <body>
 
-<header>
-  <div class="wrap">
-    <div class="eyebrow">경영지원실 · 자체 구축</div>
-    <h1>ESG 데이터 입력플랫폼</h1>
-    <p>W0 — 배포 파이프라인 확인 (G0 게이트)</p>
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-name">POWERNET ESG</div>
+      <div class="brand-sub">데이터 입력플랫폼</div>
+    </div>
+    <nav class="nav" id="nav">
+      <a href="#/master" data-route="master">기준정보</a>
+      <a href="#/health" data-route="health">시스템 상태</a>
+    </nav>
+    <div class="whoami" id="whoami">확인 중…</div>
   </div>
-</header>
+</div>
 
-<main class="wrap">
-  <div id="banner" class="banner load">
-    <h2>확인 중…</h2>
-    <p>배포·인증·데이터베이스·파일 저장소 상태를 조회하고 있습니다.</p>
-  </div>
-
-  <div id="checks"></div>
-
-  <h3>내 역할</h3>
-  <div id="me" class="card">
-    <div class="fact">조회 중…</div>
-  </div>
-
-  <div class="actions">
-    <button type="button" onclick="load()">다시 확인</button>
-    <button type="button" class="ghost" onclick="toggleRaw()">원본 응답 보기</button>
-  </div>
-  <pre id="raw" hidden></pre>
+<main class="wrap" id="view">
+  <div class="banner load"><p>불러오는 중…</p></div>
 </main>
 
-<footer class="wrap">
-  <p class="note">
-    이 화면의 네 항목이 모두 <b>정상</b>이면 G0 게이트를 통과한 것이고, W1(데이터베이스·기준정보 화면)으로 넘어갑니다.<br>
-    <b>배출계수</b>가 주의 상태인 것은 정상입니다 — 실제 고시값 확인 후 등록하며, 산정 로직(W3) 전까지 확보하면 됩니다.<br>
-    문제가 있으면 각 항목의 안내 문구를 따르고, 해결되지 않으면 <b>원본 응답 보기</b>의 내용을 그대로 복사해 AI에게 붙여넣으세요.
-  </p>
-</footer>
-
-<script>
-const LABEL = {
-  access:   { title: '인증 (Cloudflare Access)', desc: '로그인과 역할 매핑' },
-  database: { title: '데이터베이스 (D1)',         desc: '스키마와 기준정보 적재' },
-  storage:  { title: '파일 저장소 (R2)',          desc: '증빙 파일 보관 버킷' },
-  factors:  { title: '배출계수',                  desc: '산정에 사용하는 계수 등록' },
-};
-const STATUS_KO = { ok: '정상', warn: '주의', fail: '실패', load: '확인 중' };
-let rawText = '';
-
-function el(tag, cls, text) {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text !== undefined) n.textContent = text;
-  return n;
-}
-
-function fact(label, value) {
-  const f = el('div', 'fact');
-  f.append(label + ' ');
-  const b = el('b', 'num', String(value));
-  f.append(b);
-  return f;
-}
-
-function renderCheck(key, c) {
-  const card = el('div', 'card');
-  const top = el('div', 'card-top');
-  top.append(el('span', 'dot ' + c.status));
-  top.append(el('span', 'card-title', LABEL[key].title));
-  top.append(el('span', 'badge ' + c.status, STATUS_KO[c.status] || c.status));
-  card.append(top);
-
-  const facts = el('div', 'facts');
-  facts.append(el('div', 'fact', LABEL[key].desc));
-
-  if (key === 'access') {
-    facts.append(fact('로그인', c.authenticated ? '확인됨' : '없음'));
-    if (c.roles && c.roles.length) facts.append(fact('부여된 역할', c.roles.join(', ')));
-  }
-  if (key === 'database' && c.counts) {
-    facts.append(fact('법인', c.counts.entities));
-    facts.append(fact('지표', c.counts.metrics));
-    facts.append(fact('담당배정', c.counts.assignments));
-    facts.append(fact('입력값', c.counts.entries));
-    if (c.monthly_per_entity && c.monthly_per_entity.length) {
-      const per = c.monthly_per_entity.map(r => r.entity_code + ' ' + r.n).join(' · ');
-      facts.append(fact('월간 입력 항목', per));
-    }
-    facts.append(fact('부담당자 미지정', c.missing_backup));
-  }
-  if (key === 'storage') facts.append(fact('버킷 연결', '확인됨'));
-  if (key === 'factors') {
-    facts.append(fact('등록된 계수', c.registered ?? 0));
-    if (c.latest_version) facts.append(fact('버전', c.latest_version));
-  }
-  card.append(facts);
-
-  if (c.hint) {
-    const h = el('div', 'hint' + (c.status === 'fail' ? ' fail' : ''), c.hint);
-    card.append(h);
-  }
-  if (c.error) card.append(el('pre', null, c.error));
-  return card;
-}
-
-function renderBanner(overall) {
-  const b = document.getElementById('banner');
-  b.className = 'banner ' + overall;
-  b.innerHTML = '';
-  const msg = {
-    ok:   ['모두 정상입니다', 'G0 게이트를 통과했습니다. W1(데이터베이스·기준정보 화면)으로 넘어갈 수 있습니다.'],
-    warn: ['동작하지만 확인할 항목이 있습니다', '아래 주의 항목의 안내를 확인하세요. 배출계수 미등록은 이 단계에서 정상입니다.'],
-    fail: ['막힌 항목이 있습니다', '아래 실패 항목의 안내를 따라 조치하세요. 다른 항목은 계속 사용할 수 있습니다.'],
-  }[overall] || ['상태를 알 수 없습니다', '원본 응답을 확인하세요.'];
-  b.append(el('h2', null, msg[0]));
-  b.append(el('p', null, msg[1]));
-}
-
-async function load() {
-  const checks = document.getElementById('checks');
-  const me = document.getElementById('me');
-  checks.innerHTML = '';
-  me.innerHTML = '<div class="fact">조회 중…</div>';
-
-  let health;
-  try {
-    const res = await fetch('/api/health', { cache: 'no-store' });
-    health = await res.json();
-    rawText = JSON.stringify(health, null, 2);
-  } catch (err) {
-    renderBanner('fail');
-    rawText = String(err);
-    checks.append(el('pre', null, '서버에 연결할 수 없습니다.\n' + err));
-    return;
-  }
-
-  renderBanner(health.overall);
-  ['access', 'database', 'storage', 'factors'].forEach(k => {
-    if (health.checks && health.checks[k]) checks.append(renderCheck(k, health.checks[k]));
-  });
-
-  me.innerHTML = '';
-  try {
-    const res = await fetch('/api/me', { cache: 'no-store' });
-    const data = await res.json();
-    rawText += '\n\n/api/me\n' + JSON.stringify(data, null, 2);
-    if (res.status === 401) {
-      me.append(el('div', 'fact', '로그인이 필요합니다. Cloudflare Access 설정 후 다시 확인하세요.'));
-    } else if (!data.assignments || data.assignments.length === 0) {
-      me.append(el('div', 'fact', data.hint || '매핑된 역할이 없습니다.'));
-    } else {
-      data.assignments.forEach(a => {
-        const row = el('div', 'row');
-        const left = el('div');
-        left.append(el('div', null, a.role_label));
-        left.append(el('div', 'role-code', a.role_code + ' · ' + a.entity_code + ' · ' + a.scope));
-        row.append(left);
-        const right = el('div', 'fact');
-        right.append('담당 ');
-        right.append(el('b', 'num', String(a.owned_metrics)));
-        right.append(' · 부담당 ');
-        right.append(el('b', 'num', String(a.backup_metrics)));
-        row.append(right);
-        me.append(row);
-      });
-    }
-  } catch (err) {
-    me.append(el('pre', null, String(err)));
-  }
-
-  const raw = document.getElementById('raw');
-  if (!raw.hidden) raw.textContent = rawText;
-}
-
-function toggleRaw() {
-  const raw = document.getElementById('raw');
-  raw.hidden = !raw.hidden;
-  if (!raw.hidden) raw.textContent = rawText;
-}
-
-load();
-</script>
+<script src="/app.js"></script>
 </body>
 </html>

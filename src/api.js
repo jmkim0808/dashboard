@@ -52,6 +52,289 @@ function resolveRoles(request, env) {
   return { authenticated: true, roles, mapping: 'ok' };
 }
 
+/**
+ * 기준정보(마스터) 접근 권한.
+ * 조회·수정 모두 본사 권한자(admin / approver / manager)로 제한한다.
+ * 입력 담당자(entry)와 경영진(executive)은 이 화면에 접근하지 않는다.
+ */
+const MASTER_SCOPES = new Set(['admin', 'approver', 'manager']);
+
+/**
+ * 화면에서 수정할 수 있는 지표 필드 (화이트리스트).
+ *
+ * evidence_policy 를 의도적으로 제외한다. 이 값을 화면에서 'required' 로 바꿀 수 있으면
+ * 인사·안전 지표에 급여대장을 첨부할 경로가 열린다. 개인정보 보호 설계(R86)는
+ * 화면에서 뚫을 수 없어야 한다.
+ *
+ * 산정 로직의 근간(category / is_calculated / calc_kind / numerator_codes /
+ * denominator_codes / multiplier / factor_type / ghg_scope)도 제외한다.
+ * 이것들은 운영 변경이 아니라 설계 변경이므로 schema/seed 로만 바꾼다.
+ * R73(마스터 변경은 전부 화면에서)이 대상으로 삼는 것은 반복적인 운영 변경
+ * — 배출계수 개정, 환율 갱신, 항목명·단위·담당자 변경 — 이다.
+ */
+const METRIC_EDITABLE = new Set([
+  'name_ko', 'name_zh', 'name_vi', 'unit_standard', 'period_type', 'aggregation',
+  'definition_ko', 'help_ko', 'help_zh', 'help_vi',
+  'disclosure_level', 'gri_code', 'kssb_code', 'sort_order', 'active_to',
+]);
+
+const ENUM_VALUES = {
+  period_type: ['monthly', 'quarterly', 'annual'],
+  aggregation: ['sum', 'avg', 'eop'],
+  disclosure_level: ['internal', 'customer', 'public'],
+};
+
+/**
+ * 마스터 API 공통 권한 확인.
+ * 통과하면 { roles }, 막히면 { error: Response } 를 돌려준다.
+ */
+async function authorizeMaster(request, env) {
+  const identity = resolveRoles(request, env);
+  const required = String(env.REQUIRE_ACCESS ?? 'true') !== 'false';
+
+  if (!identity.authenticated) {
+    // REQUIRE_ACCESS=false 는 최초 배포 확인용이다. 이때만 로컬 확인을 허용하고,
+    // 헬스체크 화면이 이 상태를 "주의"로 표시한다. 운영에서는 항상 true 여야 한다.
+    if (required) {
+      return { error: json({ error: 'unauthenticated', hint: 'Cloudflare Access 로그인이 필요합니다.' }, 401) };
+    }
+    return { roles: [], scopes: new Set(['admin']), unauthenticated_local: true };
+  }
+  if (identity.roles.length === 0) {
+    return { error: json({ error: 'no_role', hint: '이 계정에 역할이 매핑되지 않았습니다. ROLE_MAP 을 확인하세요.' }, 403) };
+  }
+
+  const ph = identity.roles.map(() => '?').join(',');
+  const rows = await env.DB.prepare(
+    `SELECT code, scope, entity_code FROM role WHERE code IN (${ph}) AND is_active = 1`
+  ).bind(...identity.roles).all();
+
+  const scopes = new Set(rows.results.map((r) => r.scope));
+  const allowed = [...scopes].some((s) => MASTER_SCOPES.has(s));
+  if (!allowed) {
+    return { error: json({
+      error: 'forbidden',
+      hint: '기준정보 관리 권한이 없습니다. 이 화면은 본사 총괄·승인자만 사용합니다.',
+    }, 403) };
+  }
+  return { roles: rows.results, scopes, actor: rows.results[0].code };
+}
+
+/** 마스터 변경을 이력으로 남긴다 (D-4 정신 — entry 외의 변경도 추적한다) */
+async function logMasterChange(env, table, rowKey, field, oldValue, newValue, actor) {
+  await env.DB.prepare(
+    `INSERT INTO audit_log (table_name, row_key, field, old_value, new_value, changed_by_role, changed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(table, rowKey, field,
+         oldValue === null || oldValue === undefined ? null : String(oldValue),
+         newValue === null || newValue === undefined ? null : String(newValue),
+         actor, new Date().toISOString()).run();
+}
+
+/** GET /api/master — 기준정보 전체. 데이터량이 작아 한 번에 보낸다 */
+async function handleMasterBootstrap(env) {
+  const [entities, roles, metrics, units, assignments, factors, fx, reasons, availability] =
+    await env.DB.batch([
+      env.DB.prepare(`SELECT code, name_ko, name_zh, name_vi, country, currency,
+                             fiscal_year_start, locale_default, calc_standard, grid_region
+                        FROM entity WHERE is_active = 1 ORDER BY code`),
+      env.DB.prepare(`SELECT code, entity_code, label_ko, scope, locale
+                        FROM role WHERE is_active = 1 ORDER BY entity_code, code`),
+      env.DB.prepare(`SELECT code, category, name_ko, name_zh, name_vi, unit_standard,
+                             period_type, aggregation, definition_ko, help_ko, help_zh, help_vi,
+                             disclosure_level, evidence_policy, gri_code, kssb_code,
+                             is_calculated, calc_kind, numerator_codes, denominator_codes,
+                             multiplier, factor_type, ghg_scope, sort_order, active_from, active_to
+                        FROM metric ORDER BY sort_order`),
+      env.DB.prepare(`SELECT metric_code, entity_code, unit_input, factor_to_standard
+                        FROM metric_unit_override ORDER BY metric_code, entity_code`),
+      env.DB.prepare(`SELECT metric_code, entity_code, owner_role, backup_role, is_applicable
+                        FROM metric_assignment ORDER BY entity_code, metric_code`),
+      env.DB.prepare(`SELECT id, factor_type, purpose, region, year, value, unit, gwp_set,
+                             source, published_at, version
+                        FROM factor ORDER BY version DESC, region, factor_type`),
+      env.DB.prepare(`SELECT currency, year, rate_avg, source, version
+                        FROM fx_rate ORDER BY version DESC, currency`),
+      env.DB.prepare(`SELECT code, label_ko, label_zh, label_vi FROM unavailable_reason ORDER BY sort_order`),
+      env.DB.prepare(`SELECT reason_code, COUNT(*) AS n FROM data_availability GROUP BY reason_code`),
+    ]);
+
+  return json({
+    entities: entities.results,
+    roles: roles.results,
+    metrics: metrics.results,
+    units: units.results,
+    assignments: assignments.results,
+    factors: factors.results,
+    fx_rates: fx.results,
+    unavailable_reasons: reasons.results,
+    availability_summary: availability.results,
+    editable_metric_fields: [...METRIC_EDITABLE],
+    enum_values: ENUM_VALUES,
+  });
+}
+
+/** PATCH /api/master/metric/:code — 화이트리스트 필드만 수정하고 이력을 남긴다 */
+async function handleMetricPatch(code, body, env, actor) {
+  const current = await env.DB.prepare(`SELECT * FROM metric WHERE code = ?`).bind(code).first();
+  if (!current) return json({ error: 'not_found', code }, 404);
+
+  const changes = [];
+  for (const [field, raw] of Object.entries(body || {})) {
+    if (!METRIC_EDITABLE.has(field)) {
+      return json({ error: 'field_not_editable', field,
+        hint: field === 'evidence_policy'
+          ? '증빙 정책은 화면에서 변경할 수 없습니다. 인사·안전 지표에 개인정보가 첨부될 경로를 여는 변경이기 때문입니다 (R86).'
+          : '이 항목은 산정 로직의 근간이므로 화면에서 변경하지 않습니다.' }, 400);
+    }
+    if (ENUM_VALUES[field] && raw !== null && !ENUM_VALUES[field].includes(raw)) {
+      return json({ error: 'invalid_value', field, allowed: ENUM_VALUES[field] }, 400);
+    }
+    const value = raw === '' ? null : raw;
+    if (String(current[field] ?? '') !== String(value ?? '')) {
+      changes.push([field, current[field], value]);
+    }
+  }
+  if (changes.length === 0) return json({ updated: 0, changes: [] });
+
+  const setSql = changes.map(([f]) => `${f} = ?`).join(', ');
+  await env.DB.prepare(`UPDATE metric SET ${setSql} WHERE code = ?`)
+    .bind(...changes.map(([, , v]) => v), code).run();
+  for (const [f, oldV, newV] of changes) {
+    await logMasterChange(env, 'metric', code, f, oldV, newV, actor);
+  }
+  return json({ updated: changes.length, changes: changes.map(([f, o, n]) => ({ field: f, from: o, to: n })) });
+}
+
+/** PATCH /api/master/assignment — 담당·부담당·적용여부. 부담당자는 비울 수 없다 (R67) */
+async function handleAssignmentPatch(body, env, actor) {
+  const { metric_code, entity_code, owner_role, backup_role, is_applicable } = body || {};
+  if (!metric_code || !entity_code) return json({ error: 'missing_key' }, 400);
+
+  const current = await env.DB.prepare(
+    `SELECT * FROM metric_assignment WHERE metric_code = ? AND entity_code = ?`
+  ).bind(metric_code, entity_code).first();
+  if (!current) return json({ error: 'not_found' }, 404);
+
+  const next = {
+    owner_role: owner_role ?? current.owner_role,
+    backup_role: backup_role ?? current.backup_role,
+    is_applicable: is_applicable === undefined ? current.is_applicable : (is_applicable ? 1 : 0),
+  };
+  if (!next.backup_role) {
+    return json({ error: 'backup_required',
+      hint: '부담당자는 비울 수 없습니다. 담당자 1인이 부재하면 그 법인 데이터가 멈추기 때문입니다 (P-7).' }, 400);
+  }
+  if (next.owner_role === next.backup_role) {
+    return json({ error: 'same_role', hint: '주담당과 부담당은 서로 달라야 합니다.' }, 400);
+  }
+
+  try {
+    await env.DB.prepare(
+      `UPDATE metric_assignment SET owner_role = ?, backup_role = ?, is_applicable = ?
+        WHERE metric_code = ? AND entity_code = ?`
+    ).bind(next.owner_role, next.backup_role, next.is_applicable, metric_code, entity_code).run();
+  } catch (err) {
+    return json({ error: 'db_rejected', message: String(err.message || err) }, 400);
+  }
+
+  const key = `${metric_code}/${entity_code}`;
+  for (const f of ['owner_role', 'backup_role', 'is_applicable']) {
+    if (String(current[f]) !== String(next[f])) {
+      await logMasterChange(env, 'metric_assignment', key, f, current[f], next[f], actor);
+    }
+  }
+  return json({ ok: true, assignment: { metric_code, entity_code, ...next } });
+}
+
+/** PUT / DELETE /api/master/unit — 법인별 입력 단위 오버라이드 (R26 / P-5) */
+async function handleUnitPut(body, env, actor) {
+  const { metric_code, entity_code, unit_input, factor_to_standard } = body || {};
+  if (!metric_code || !entity_code) return json({ error: 'missing_key' }, 400);
+
+  if (unit_input === null || unit_input === '') {
+    await env.DB.prepare(`DELETE FROM metric_unit_override WHERE metric_code = ? AND entity_code = ?`)
+      .bind(metric_code, entity_code).run();
+    await logMasterChange(env, 'metric_unit_override', `${metric_code}/${entity_code}`,
+                          'unit_input', null, '(삭제)', actor);
+    return json({ ok: true, removed: true });
+  }
+  const f = Number(factor_to_standard);
+  if (!Number.isFinite(f) || f <= 0) {
+    return json({ error: 'invalid_factor', hint: '환산계수는 0보다 큰 숫자여야 합니다. 예: 万kWh -> kWh 는 10000' }, 400);
+  }
+  await env.DB.prepare(
+    `INSERT INTO metric_unit_override (metric_code, entity_code, unit_input, factor_to_standard)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(metric_code, entity_code) DO UPDATE SET unit_input = ?, factor_to_standard = ?`
+  ).bind(metric_code, entity_code, unit_input, f, unit_input, f).run();
+  await logMasterChange(env, 'metric_unit_override', `${metric_code}/${entity_code}`,
+                        'unit_input', null, `${unit_input} x${f}`, actor);
+  return json({ ok: true });
+}
+
+/** POST /api/master/factor — 계수는 수정하지 않고 새 버전으로만 등록한다 (R59) */
+async function handleFactorPost(body, env, actor) {
+  const need = ['factor_type', 'purpose', 'region', 'year', 'value', 'unit', 'source', 'published_at', 'version'];
+  const missing = need.filter((k) => body?.[k] === undefined || body[k] === '');
+  if (missing.length) return json({ error: 'missing_fields', missing }, 400);
+
+  const value = Number(body.value);
+  const year = Number(body.year);
+  if (!Number.isFinite(value) || value < 0) return json({ error: 'invalid_value' }, 400);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) return json({ error: 'invalid_year' }, 400);
+  if (!['emission', 'heating_value'].includes(body.purpose)) return json({ error: 'invalid_purpose' }, 400);
+
+  try {
+    await env.DB.prepare(
+      `INSERT INTO factor (factor_type, purpose, region, year, value, unit, gwp_set, source, published_at, version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(body.factor_type, body.purpose, body.region, year, value, body.unit,
+           body.gwp_set || null, body.source, body.published_at, body.version).run();
+  } catch (err) {
+    return json({ error: 'db_rejected', message: String(err.message || err),
+      hint: '같은 종류·지역·연도·버전의 계수가 이미 있습니다. 값을 고치려면 새 버전으로 등록하세요 (R59).' }, 400);
+  }
+  await logMasterChange(env, 'factor',
+    `${body.factor_type}/${body.purpose}/${body.region}/${year}/${body.version}`,
+    'value', null, String(value), actor);
+  return json({ ok: true });
+}
+
+/** POST /api/master/fx — 연평균 환율 (R65) */
+async function handleFxPost(body, env, actor) {
+  const need = ['currency', 'year', 'rate_avg', 'source', 'version'];
+  const missing = need.filter((k) => body?.[k] === undefined || body[k] === '');
+  if (missing.length) return json({ error: 'missing_fields', missing }, 400);
+  const rate = Number(body.rate_avg);
+  const year = Number(body.year);
+  if (!Number.isFinite(rate) || rate <= 0) return json({ error: 'invalid_rate' }, 400);
+  if (!Number.isInteger(year)) return json({ error: 'invalid_year' }, 400);
+
+  try {
+    await env.DB.prepare(
+      `INSERT INTO fx_rate (currency, year, rate_avg, source, version) VALUES (?, ?, ?, ?, ?)`
+    ).bind(body.currency, year, rate, body.source, body.version).run();
+  } catch (err) {
+    return json({ error: 'db_rejected', message: String(err.message || err),
+      hint: '같은 통화·연도·버전의 환율이 이미 있습니다.' }, 400);
+  }
+  await logMasterChange(env, 'fx_rate', `${body.currency}/${year}/${body.version}`,
+                        'rate_avg', null, String(rate), actor);
+  return json({ ok: true });
+}
+
+/** GET /api/master/audit — 최근 변경 이력 */
+async function handleMasterAudit(env) {
+  const rows = await env.DB.prepare(
+    `SELECT table_name, row_key, field, old_value, new_value, changed_by_role, changed_at
+       FROM audit_log
+      WHERE table_name IN ('metric','metric_assignment','metric_unit_override','factor','fx_rate')
+      ORDER BY id DESC LIMIT 50`
+  ).all();
+  return json({ entries: rows.results });
+}
+
 /** D1 연결과 기준정보 적재 상태 */
 async function checkDatabase(env) {
   try {
@@ -219,6 +502,40 @@ export default {
       try {
         if (url.pathname === '/api/health') return await handleHealth(request, env);
         if (url.pathname === '/api/me')     return await handleMe(request, env);
+
+        if (url.pathname.startsWith('/api/master')) {
+          const auth = await authorizeMaster(request, env);
+          if (auth.error) return auth.error;
+          const actor = auth.actor || null;
+          const body = ['POST', 'PATCH', 'PUT'].includes(request.method)
+            ? await request.json().catch(() => ({}))
+            : null;
+
+          if (url.pathname === '/api/master' && request.method === 'GET') {
+            return await handleMasterBootstrap(env);
+          }
+          if (url.pathname === '/api/master/audit' && request.method === 'GET') {
+            return await handleMasterAudit(env);
+          }
+          const metricMatch = url.pathname.match(/^\/api\/master\/metric\/([A-Za-z0-9._-]+)$/);
+          if (metricMatch && request.method === 'PATCH') {
+            return await handleMetricPatch(decodeURIComponent(metricMatch[1]), body, env, actor);
+          }
+          if (url.pathname === '/api/master/assignment' && request.method === 'PATCH') {
+            return await handleAssignmentPatch(body, env, actor);
+          }
+          if (url.pathname === '/api/master/unit' && request.method === 'PUT') {
+            return await handleUnitPut(body, env, actor);
+          }
+          if (url.pathname === '/api/master/factor' && request.method === 'POST') {
+            return await handleFactorPost(body, env, actor);
+          }
+          if (url.pathname === '/api/master/fx' && request.method === 'POST') {
+            return await handleFxPost(body, env, actor);
+          }
+          return json({ error: 'not_found', path: url.pathname, method: request.method }, 404);
+        }
+
         return json({ error: 'not_found', path: url.pathname }, 404);
       } catch (err) {
         // 오류 메시지를 그대로 내려준다. 비개발자가 AI 에게 붙여넣을 수 있어야 한다 (EP8 원칙 6)
