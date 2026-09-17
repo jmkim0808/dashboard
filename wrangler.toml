@@ -1,0 +1,30 @@
+# Cloudflare Workers 배포 설정
+#
+# 최초 설정 순서 (EP8 W0)
+#   1) npx wrangler login
+#   2) npx wrangler d1 create powernet-esg     -> 출력된 database_id 를 아래에 붙여넣는다
+#   3) npx wrangler r2 bucket create powernet-esg-evidence
+#   4) npx wrangler deploy
+#
+# 의존성은 wrangler 하나뿐이다. 빌드 단계를 만들지 않는다. (EP8 원칙 2)
+
+name = "powernet-esg"
+main = "src/api.js"
+compatibility_date = "2026-09-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "powernet-esg"
+database_id = "[확인 필요 — wrangler d1 create 출력값을 붙여넣는다]"
+
+[[r2_buckets]]
+binding = "EVIDENCE"
+bucket_name = "powernet-esg-evidence"
+
+[vars]
+APP_NAME = "POWERNET ESG"
+FACTOR_VERSION = "v2026.1"
