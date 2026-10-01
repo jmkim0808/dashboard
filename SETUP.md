@@ -139,23 +139,30 @@ npm run db:remote           # 스키마 + 기준정보
 npm run db:factors:remote   # 배출계수 ← 이걸 빼면 산정이 전부 "미산정" 으로 나온다
 ```
 
+🪟 Windows 에서 `npm run` 이 아무것도 출력하지 않으면 같은 일을 `wr` 로 한다.
+`-y` 는 "데이터베이스가 잠시 멈춥니다. 진행할까요?" 확인에 자동으로 예를 누른다.
+
+```powershell
+wr d1 execute powernet-esg --remote --file=db/schema.sql -y
+wr d1 execute powernet-esg --remote --file=db/seed.sql -y
+wr d1 execute powernet-esg --remote --file=db/factors.sql -y
+```
+
 **확인** — 오류 없이 끝난다.
 
 ---
 
 ## A-5. 로그인 없이 한 번 띄워보기
 
-Access 를 아직 안 걸었으므로, 잠시 인증 요구를 끈다.
-**`wrangler.toml`** 의 아래 값을 바꾼다.
-
-```toml
-REQUIRE_ACCESS = "false"     # ← A 단계 동안만. B-4 에서 반드시 "true" 로 되돌린다
-```
+Access 를 아직 안 걸었으므로, **이번 배포에서만** 인증 요구를 끈다.
+`wrangler.toml` 은 고치지 않는다 — 배포 명령에 옵션으로만 준다.
 
 ```bash
-npm run check     # 설정 검증 (배포 안 함)
-npm run deploy
+npx wrangler deploy --var REQUIRE_ACCESS:false
 ```
+
+> 파일을 `"false"` 로 고쳐 배포하면, 나중에 되돌리는 것을 잊는 순간 로그인 없이 열린 채로 남는다.
+> 옵션으로 주면 **다음에 그냥 `deploy` 하는 순간 자동으로 다시 켜진다.** 잊을 방법이 없다.
 
 배포가 끝나면 `https://powernet-esg.<계정>.workers.dev` 주소가 출력된다. 그 주소를 연다.
 
@@ -257,17 +264,15 @@ Worker 는 로그인한 이메일을 역할코드로 바꾼 직후 버리고, �
 
 ---
 
-## B-4. 🔴 인증 요구 되돌리기
+## B-4. 🔴 인증 요구 다시 켜기
 
-A-5 에서 꺼 두었던 것을 **반드시** 켠다. **`wrangler.toml`**:
-
-```toml
-REQUIRE_ACCESS = "true"
-```
+A-5 에서 옵션으로 껐던 것을 켠다. **옵션 없이 배포하면 된다.**
 
 ```bash
-npm run deploy
+npx wrangler deploy
 ```
+
+`wrangler.toml` 의 `REQUIRE_ACCESS = "true"` 가 그대로 적용된다.
 
 **확인** — 로그아웃 상태(시크릿 창)로 접속하면 로그인 화면이 먼저 나온다.
 
@@ -354,7 +359,7 @@ npx wrangler tail
 
 | 증상 | 원인 | 조치 |
 |---|---|---|
-| 배포는 됐는데 화면이 "로그인 필요"만 뜬다 | `REQUIRE_ACCESS="true"` 인데 Access 미설정 | A 단계면 `"false"` 로, B 단계면 B-2 를 끝낸다 |
+| 배포는 됐는데 화면이 "로그인 필요"만 뜬다 | Access 미설정 상태에서 옵션 없이 배포함 | A 단계면 `deploy --var REQUIRE_ACCESS:false`, B 단계면 B-2 를 끝낸다 |
 | 로그인은 되는데 "역할 미매핑" | `ROLE_MAP` 에 그 이메일이 없다 | B-3 의 JSON 과 B-2 의 Policy 이메일을 맞춘다 |
 | 산정값이 전부 "미산정" | 배출계수 미적용 | `npm run db:factors:remote` |
 | `db:remote` 가 "table already exists" | 이미 적용된 DB | 정상이다. 다시 적용할 필요 없다 |

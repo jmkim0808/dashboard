@@ -19,7 +19,8 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "powernet-esg"
-database_id = "[확인 필요 — wrangler d1 create 출력값을 붙여넣는다]"
+# 2026-10-01 생성. 비밀값이 아니다 — 이 ID 만으로는 접근할 수 없고 Cloudflare 계정 인증이 필요하다
+database_id = "3c853e68-3c36-484a-80d7-79d4c9a267aa"
 
 [[r2_buckets]]
 binding = "EVIDENCE"
@@ -29,6 +30,8 @@ bucket_name = "powernet-esg-evidence"
 APP_NAME = "POWERNET ESG"
 FACTOR_VERSION = "v2026.1"
 
-# Cloudflare Access 통과를 강제한다. 최초 배포 확인 시에만 임시로 "false" 로 두고,
-# Access Application 설정 직후 반드시 "true" 로 되돌린다. (SETUP.md 4단계)
+# Cloudflare Access 통과를 강제한다. 이 파일에서는 항상 "true" 로 둔다.
+# 테스트 배포(SETUP.md A-5)는 파일을 고치지 않고 배포 명령에서만 끈다:
+#   wrangler deploy --var REQUIRE_ACCESS:false
+# 이렇게 하면 다음에 그냥 deploy 하는 순간 자동으로 다시 켜진다. 되돌리는 걸 잊을 수 없다.
 REQUIRE_ACCESS = "true"
