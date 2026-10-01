@@ -40,6 +40,35 @@ npm install
 
 **확인** — `npx wrangler --version` 이 버전을 출력한다.
 
+### 🪟 Windows · PowerShell 에서 `npx wrangler` 가 안 될 때
+
+`npx` 가 wrangler 를 못 찾는 경우가 있다. 설치는 정상이고 `npx` 만 문제다.
+아래로 확인한다.
+
+```powershell
+.\node_modules\.bin\wrangler --version
+```
+
+여기서 버전이 나오면 짧은 별명을 만들어 쓴다. **이 문서의 `npx wrangler` 를 전부 `wr` 로 바꿔 읽으면 된다.**
+
+```powershell
+$repo = $PWD.Path
+function wr { & "$repo\node_modules\.bin\wrangler" @args }
+wr --version
+```
+
+PowerShell 창을 닫았다 열면 위 두 줄을 다시 실행한다.
+`npm run dev` · `npm run deploy` 같은 `npm run ~` 명령은 별명 없이도 동작한다.
+
+> `npm install` 이 **`allow-scripts`** 경고를 내며 `esbuild` · `workerd` 설치 스크립트를
+> 막았다면 wrangler 가 아예 실행되지 않는다. `workerd` 는 Cloudflare 런타임 실행파일이다.
+> ```powershell
+> npm approve-scripts esbuild
+> npm approve-scripts workerd
+> npm install
+> ```
+> `npm audit fix` 는 실행하지 않는다. wrangler 버전이 바뀔 수 있다.
+
 ---
 
 ## A-1. Cloudflare 로그인
@@ -335,3 +364,5 @@ npx wrangler tail
 | `npm run verify` | 제약 검증 (24항목) |
 | `npm run g3` | 산정 검산 (84항목) — dev 서버를 띄운 상태에서 |
 | `npx wrangler tail` | 운영 로그 실시간 보기 |
+
+> Windows 에서 `npx wrangler` 가 안 되면 A-0 의 `wr` 별명을 쓴다.
