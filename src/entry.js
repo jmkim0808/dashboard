@@ -376,7 +376,21 @@ async function sha256Hex(buffer) {
  * 증빙 파일 업로드.
  * 인사·안전 지표는 DB 트리거가 거부한다 — 여기서도 미리 걸러 안내를 준다 (R86).
  */
+/**
+ * 파일 저장소(R2)가 연결되지 않은 배포에서 증빙 기능을 끄는 응답.
+ *
+ * R2 는 결제수단 등록이 있어야 켜지므로, 테스트 배포(SETUP.md A 단계)는 R2 없이 올린다.
+ * 그때 증빙 버튼을 누르면 서버 오류(500)가 아니라 이유가 적힌 안내가 나가야 한다.
+ */
+export const STORAGE_OFF = {
+  status: 503,
+  body: { error: 'storage_not_connected',
+    hint: '테스트 배포라 파일 저장소(R2)가 연결되어 있지 않습니다. '
+        + '값 입력·승인·산정은 그대로 동작하고, 증빙 첨부는 정식 배포 후 사용할 수 있습니다.' },
+};
+
 export async function uploadEvidence(env, request, scope, actorRole) {
+  if (!env.EVIDENCE) return STORAGE_OFF;
   let form;
   try { form = await request.formData(); } catch { return { status: 400, body: { error: 'invalid_form' } }; }
 
@@ -445,6 +459,7 @@ export async function uploadEvidence(env, request, scope, actorRole) {
 
 /** 증빙 파일 내려주기 — 자기 법인 것만 */
 export async function fetchEvidence(env, r2Key, scope) {
+  if (!env.EVIDENCE) return STORAGE_OFF;
   const row = await env.DB.prepare(
     `SELECT v.r2_key, v.content_type, v.original_filename, e.entity_code
        FROM evidence v JOIN entry e ON e.id = v.entry_id

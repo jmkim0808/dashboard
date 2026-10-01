@@ -17,7 +17,7 @@
  */
 
 import { computeMonth, computeYear, latestFactorVersion } from './calc.js';
-import { dueInPeriod, isValidPeriod } from './entry.js';
+import { dueInPeriod, isValidPeriod, STORAGE_OFF } from './entry.js';
 
 const EXPORT_SCOPES = new Set(['approver', 'admin']);
 
@@ -623,6 +623,8 @@ export async function createSubmission(env, body, report, actor) {
     return { status: 403, body: { error: 'forbidden',
       hint: '대외 산출물 생성은 파트장(승인자)·시스템 관리자만 할 수 있습니다 (R54).' } };
   }
+  // 제출 이력은 "그때 낸 파일"을 함께 보관해야 의미가 있다. 파일을 못 남기면 이력도 남기지 않는다
+  if (!env.EVIDENCE) return STORAGE_OFF;
   const { submitted_to, purpose, period_from, period_to, years, disclosure } = body || {};
   if (!submitted_to || !PURPOSES.has(purpose)) {
     return { status: 400, body: { error: 'invalid_params',
@@ -685,6 +687,7 @@ export async function listSubmissions(env) {
 
 /** 제출한 그 파일을 그대로 다시 꺼낸다 */
 export async function fetchSubmissionFile(env, key) {
+  if (!env.EVIDENCE) return STORAGE_OFF;
   if (!key.startsWith('submission/')) return { status: 403 };
   const obj = await env.EVIDENCE.get(key);
   if (!obj) return { status: 404 };

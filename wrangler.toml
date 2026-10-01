@@ -30,8 +30,40 @@ bucket_name = "powernet-esg-evidence"
 APP_NAME = "POWERNET ESG"
 FACTOR_VERSION = "v2026.1"
 
-# Cloudflare Access 통과를 강제한다. 이 파일에서는 항상 "true" 로 둔다.
-# 테스트 배포(SETUP.md A-5)는 파일을 고치지 않고 배포 명령에서만 끈다:
-#   wrangler deploy --var REQUIRE_ACCESS:false
-# 이렇게 하면 다음에 그냥 deploy 하는 순간 자동으로 다시 켜진다. 되돌리는 걸 잊을 수 없다.
+# Cloudflare Access 통과를 강제한다. 운영 설정에서는 항상 "true" 로 둔다.
+# 테스트 배포는 이 값을 고치지 않고 아래 [env.preview] 로 따로 올린다 (SETUP.md A-5).
+# 운영과 테스트가 다른 워커라서, 운영을 로그인 없이 열어둘 방법이 없다.
 REQUIRE_ACCESS = "true"
+
+# =============================================================================
+# 테스트 배포 (SETUP.md A 단계) — 결제수단 없이 띄우는 미리보기
+#
+#   wrangler deploy --env preview
+#
+# 운영과 다른 점 세 가지:
+#   1) 워커 이름이 powernet-esg-preview 다. 주소에 "preview" 가 들어가 운영과 헷갈리지 않고,
+#      다 쓰면 `wrangler delete --env preview` 한 줄로 지운다.
+#   2) 파일 저장소(R2)를 연결하지 않는다. R2 는 결제수단 등록이 있어야 켜진다.
+#      증빙 첨부·제출 산출물 보관만 꺼지고, 입력·승인·산정·조회는 그대로 동작한다.
+#   3) 로그인(Cloudflare Access)을 요구하지 않는다. 주소를 아는 사람은 누구나 들어온다.
+#      → 가짜 데이터로만 쓴다.
+#
+# 데이터베이스(D1)는 운영과 같은 것을 쓴다. 따라서 여기서 넣은 테스트 값은
+# 실데이터를 넣기 전에 비워야 한다 (SETUP.md "실데이터를 넣기 전에").
+#
+# wrangler 환경은 바인딩·변수를 상속하지 않으므로 아래에 다시 적는다.
+# r2_buckets 를 적지 않은 것이 의도다.
+# =============================================================================
+
+[env.preview]
+name = "powernet-esg-preview"
+
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "powernet-esg"
+database_id = "3c853e68-3c36-484a-80d7-79d4c9a267aa"
+
+[env.preview.vars]
+APP_NAME = "POWERNET ESG (미리보기)"
+FACTOR_VERSION = "v2026.1"
+REQUIRE_ACCESS = "false"

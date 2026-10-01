@@ -596,11 +596,12 @@ function renderFactors(root) {
   setChildren(root, 
     M.factors.length === 0
       ? h('div', { class: 'banner warn' },
-          h('h2', { text: '배출계수가 아직 등록되지 않았습니다 — 이 단계에서는 정상입니다' }),
+          h('h2', { text: '배출계수가 적용되지 않았습니다' }),
           h('p', null,
-            '실제 고시값을 확인한 뒤 등록합니다. 입력·검증 화면은 계수 없이 동작하므로, ',
-            h('b', { text: '산정 로직(W3, 10/6~10) 전까지' }), ' 확보하면 됩니다. ',
-            '추측값을 넣으면 그 값으로 산정을 검증하게 되고 전부 다시 해야 합니다.'))
+            '이 상태로는 배출량이 전부 ', h('b', { text: '"미산정"' }), '으로 나옵니다. ',
+            '전력 배출계수는 db/factors.sql 에 들어 있으니 그 파일을 실행하세요 (SETUP.md A-4). ',
+            '연료 계수처럼 고시값을 아직 확인하지 못한 것은 추측값으로 넣지 않습니다 — ',
+            '그 값으로 산정을 검증하게 되고 전부 다시 해야 합니다.'))
       : null,
     h('div', { class: 'hint info' },
       h('b', { text: '확인처' }),
@@ -791,7 +792,7 @@ async function viewHealth(view) {
   setChildren(view, 
     h('div', { class: 'page-head' }, h('div', null,
       h('div', { class: 'eyebrow', text: '시스템 상태' }),
-      h('h1', { text: 'W0 — 배포 파이프라인 확인 (G0)' }))),
+      h('h1', { text: H.stage ? `시스템 상태 — ${H.stage}` : '시스템 상태' }))),
     h('div', { class: 'banner ' + H.overall }, h('h2', { text: msg[0] }), h('p', { text: msg[1] })),
     cards,
     h('div', { class: 'actions' },

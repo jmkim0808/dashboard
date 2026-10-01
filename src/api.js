@@ -14,7 +14,7 @@
  * Access 를 통과하지 않는 경로가 열려 있으면 이 헤더를 위조할 수 있다.
  * 따라서 반드시:
  *   1) 커스텀 도메인에 Access Application 을 걸 것
- *   2) *.workers.dev 라우트를 비활성화할 것  (SETUP.md 4단계)
+ *   2) *.workers.dev 라우트를 비활성화할 것  (SETUP.md B-5)
  * REQUIRE_ACCESS 를 "false" 로 두면 인증 없이 열리므로, 최초 배포 확인 직후
  * 반드시 "true" 로 되돌린다.
  */
@@ -427,7 +427,7 @@ async function checkDatabase(env) {
       monthly_per_entity: perEntity.results,
       missing_backup: missingBackup.n,
       hint: counts.metrics === 0
-        ? 'schema.sql 은 적용됐지만 seed.sql 이 적용되지 않았습니다. SETUP.md 3단계를 실행하세요.'
+        ? 'schema.sql 은 적용됐지만 seed.sql 이 적용되지 않았습니다. SETUP.md A-4 를 실행하세요.'
         : null,
     };
   } catch (err) {
@@ -441,6 +441,15 @@ async function checkDatabase(env) {
 
 /** R2 버킷 연결 상태 (증빙 파일 저장소) */
 async function checkStorage(env) {
+  // 바인딩 자체가 없으면 테스트 배포(R2 미연결)다. 고장이 아니라 의도된 상태이므로 '주의'로 둔다
+  if (!env.EVIDENCE) {
+    return {
+      status: 'warn',
+      connected: false,
+      hint: '테스트 배포 — 파일 저장소(R2)가 연결되지 않았습니다. 증빙 첨부와 제출 산출물 보관만 꺼지고 '
+          + '나머지는 정상 동작합니다. 실데이터를 넣기 전에 SETUP.md B 단계에서 연결하세요.',
+    };
+  }
   try {
     const listed = await env.EVIDENCE.list({ limit: 1 });
     return { status: 'ok', objects_sampled: listed.objects.length };
@@ -448,7 +457,7 @@ async function checkStorage(env) {
     return {
       status: 'fail',
       error: String(err && err.message ? err.message : err),
-      hint: 'R2 버킷이 없습니다. SETUP.md 2단계의 버킷 생성 명령을 실행하세요.',
+      hint: 'R2 버킷에 접근할 수 없습니다. SETUP.md B 단계의 버킷 생성 명령을 실행했는지 확인하세요.',
     };
   }
 }
@@ -463,8 +472,9 @@ async function checkFactors(env) {
       return {
         status: 'warn',
         registered: 0,
-        hint: '배출계수가 아직 등록되지 않았습니다. 정상입니다 — 실제 고시값 확인(EP8 B4) 후 등록하며, '
-            + '입력·검증 화면은 계수 없이 동작합니다. 산정 로직(W3, 10/6~10) 전까지 확보하면 됩니다.',
+        // factors.sql 에 전력 배출계수가 들어 있으므로 0건이면 적용 단계를 건너뛴 것이다
+        hint: '배출계수가 적용되지 않았습니다. 이 상태로는 배출량이 전부 "미산정"으로 나옵니다. '
+            + 'db/factors.sql 을 실행하세요 (SETUP.md A-4).',
       };
     }
     return { status: 'ok', registered: row.n, latest_version: row.latest };
@@ -484,20 +494,21 @@ function checkAccess(request, env) {
       authenticated: false,
       require_access: required,
       hint: required
-        ? 'Cloudflare Access 를 통과하지 않은 요청입니다. SETUP.md 4단계에서 Access Application 을 설정하세요.'
-        : 'REQUIRE_ACCESS 가 false 입니다. 최초 배포 확인용이며, Access 설정 후 반드시 true 로 되돌리세요.',
+        ? 'Cloudflare Access 를 통과하지 않은 요청입니다. SETUP.md B-2 에서 Access Application 을 설정하세요.'
+        : '로그인 없이 열린 테스트 배포입니다. 주소를 아는 사람은 누구나 들어오므로 가짜 데이터만 넣으세요. '
+          + '실데이터 전에 SETUP.md B 단계로 운영 배포를 하면 로그인이 걸립니다.',
     };
   }
   if (identity.mapping === 'role-map-invalid-json') {
     return {
       status: 'fail', authenticated: true, roles: [],
-      hint: 'ROLE_MAP 시크릿이 올바른 JSON 이 아닙니다. SETUP.md 5단계를 다시 실행하세요.',
+      hint: 'ROLE_MAP 시크릿이 올바른 JSON 이 아닙니다. SETUP.md B-3 을 다시 실행하세요.',
     };
   }
   if (identity.mapping === 'identity-not-mapped') {
     return {
       status: 'warn', authenticated: true, roles: [],
-      hint: '로그인은 됐지만 이 계정에 역할이 매핑되지 않았습니다. ROLE_MAP 에 역할코드를 추가하세요 (SETUP.md 5단계).',
+      hint: '로그인은 됐지만 이 계정에 역할이 매핑되지 않았습니다. ROLE_MAP 에 역할코드를 추가하세요 (SETUP.md B-3).',
     };
   }
   return { status: 'ok', authenticated: true, roles: identity.roles, require_access: required };
@@ -517,7 +528,7 @@ async function handleHealth(request, env) {
 
   return json({
     app: env.APP_NAME || 'POWERNET ESG',
-    stage: 'W0 — 배포 파이프라인 확인 (G0)',
+    stage: String(env.REQUIRE_ACCESS ?? 'true') === 'false' ? '테스트 배포' : '운영',
     overall: worst,
     checked_at: new Date().toISOString(),
     checks,
@@ -638,7 +649,7 @@ export default {
             const key = url.searchParams.get('key');
             if (!key) return json({ error: 'missing_key' }, 400);
             const r = await fetchEvidence(env, key, scope);
-            if (r.status !== 200) return json({ error: 'not_found_or_forbidden' }, r.status);
+            if (r.status !== 200) return json(r.body || { error: 'not_found_or_forbidden' }, r.status);
             return new Response(r.stream, { headers: r.headers });
           }
           return json({ error: 'not_found', path: url.pathname, method: request.method }, 404);
@@ -862,7 +873,7 @@ export default {
             const key = url.searchParams.get('key');
             if (key) {
               const f = await fetchSubmissionFile(env, key);
-              if (f.status !== 200) return json({ error: 'not_found_or_forbidden' }, f.status);
+              if (f.status !== 200) return json(f.body || { error: 'not_found_or_forbidden' }, f.status);
               return new Response(f.stream, { headers: f.headers });
             }
             return json(await listSubmissions(env));
