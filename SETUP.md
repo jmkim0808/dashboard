@@ -42,36 +42,43 @@ npm install
 
 ### 🪟 Windows · PowerShell 에서 `npx wrangler` 가 안 될 때
 
-`npx` 가 wrangler 를 못 찾는 경우가 있다. 설치는 정상이고 `npx` 만 문제다.
-아래로 확인한다.
+`npx wrangler` 가 아무것도 출력하지 않거나 버전이 안 나오는 경우가 있다.
+설치는 정상이고, `npx` · `.cmd` · `.ps1` 같은 **실행 중계 파일**이 환경에 따라 다르게 동작하기 때문이다.
 
-```powershell
-.\node_modules\.bin\wrangler --version
-```
-
-여기서 버전이 나오면 짧은 별명을 만들어 쓴다. **이 문서의 `npx wrangler` 를 전부 `wr` 로 바꿔 읽으면 된다.**
+**Node 로 wrangler 를 직접 실행하면 중계 파일을 거치지 않는다.** 아래 두 줄로 짧은 별명을 만든다.
 
 ```powershell
 $repo = $PWD.Path
-function wr { & "$repo\node_modules\.bin\wrangler.cmd" @args }
-wr --version
+function wr { node "$repo\node_modules\wrangler\bin\wrangler.js" @args }
 ```
 
-> **`.cmd` 를 빼면 안 된다.** `node_modules\.bin` 에는 확장자 없는 `wrangler`(맥·리눅스용)도 있어서,
-> 전체 경로로 그 파일을 가리키면 아무것도 출력되지 않고 끝난다.
-> `.ps1` 은 실행 정책에 막힐 수 있으므로 `.cmd` 를 쓴다.
+**이 문서의 `npx wrangler` 를 전부 `wr` 로 바꿔 읽으면 된다.** (예: `npx wrangler login` → `wr login`)
 
-PowerShell 창을 닫았다 열면 위 두 줄을 다시 실행한다.
-`npm run dev` · `npm run deploy` 같은 `npm run ~` 명령은 별명 없이도 동작한다.
+- PowerShell 창을 닫았다 열면 위 두 줄을 다시 실행한다. **반드시 `dashboard` 폴더 안에서** 실행한다.
+- `npm run dev` · `npm run deploy` 같은 `npm run ~` 명령은 별명 없이도 동작한다.
+- `wr --version` 이 출력되지 않아도 **`wr login` 에서 브라우저가 열리면 정상**이다.
 
-> `npm install` 이 **`allow-scripts`** 경고를 내며 `esbuild` · `workerd` 설치 스크립트를
-> 막았다면 wrangler 가 아예 실행되지 않는다. `workerd` 는 Cloudflare 런타임 실행파일이다.
-> ```powershell
-> npm approve-scripts esbuild
-> npm approve-scripts workerd
-> npm install
-> ```
-> `npm audit fix` 는 실행하지 않는다. wrangler 버전이 바뀔 수 있다.
+> 실제 설치(2026-10-01)에서 `npx wrangler`, `node_modules\.bin\wrangler.cmd` 를 가리킨 별명이
+> 모두 무출력으로 끝났고, Node 직접 실행으로 로그인까지 완료했다.
+
+### `npm install` 이 `allow-scripts` 경고를 낼 때
+
+`esbuild` · `workerd` 설치 스크립트가 차단되면 wrangler 가 실행되지 않는다.
+`workerd` 는 Cloudflare 런타임 실행파일이다.
+
+```powershell
+npm approve-scripts esbuild
+npm approve-scripts workerd
+npm install
+```
+
+`npm audit fix` 는 실행하지 않는다. wrangler 버전이 바뀔 수 있다.
+`vulnerabilities` · `looking for funding` 메시지는 오류가 아니다.
+
+### 관리자 권한으로 PowerShell 을 열지 않는다
+
+관리자 권한으로 열면 시작 폴더가 `C:\Windows\System32` 라 `git clone` 이 `Permission denied` 로 실패한다.
+일반 PowerShell 을 쓰거나, 먼저 `cd $HOME` 으로 옮긴다.
 
 ---
 
