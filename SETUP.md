@@ -1,23 +1,38 @@
-# 설치 절차 (W0 — G0 게이트)
+# 설치 절차
 
-목표: **브라우저에서 화면이 뜨고, 로그인이 걸리고, 데이터베이스와 파일 저장소가 연결된 상태.**
-반나절 작업이며, 여기까지 되면 기술적 불확실성의 대부분이 해소된다.
+목표: **3법인 담당자가 로그인해서 자기 항목을 입력할 수 있는 상태.**
 
-각 단계 끝에 **확인** 항목이 있다. 확인이 안 되면 다음 단계로 넘어가지 않는다.
+두 단계로 나눈다.
+
+| 단계 | 소요 | 끝나면 |
+|---|---|---|
+| **A. 테스트 배포** | 30분 | 인터넷 주소가 생기고 **본인이** 전 화면을 눌러볼 수 있다 |
+| **B. 운영 전환** | 30분 | 로그인이 걸리고 **3법인 담당자가** 각자 역할로 쓸 수 있다 |
+
+A만 해도 "진짜로 도는지"는 확인된다. **A에서 멈춰도 된다 — 단, A 상태는 주소를 아는 사람이면
+누구나 들어온다. 그동안은 가짜 데이터만 넣는다.**
+
+각 단계 끝에 **확인** 항목이 있다. 확인이 안 되면 다음으로 넘어가지 않는다.
 
 ---
 
-## 0. 준비
+# A. 테스트 배포
+
+## A-0. 준비
 
 | 항목 | 내용 |
 |---|---|
-| Cloudflare 계정 | 없으면 생성. **Workers Paid 구독 필요** (월 $5) |
-| 도메인 | 회사 도메인의 서브도메인 사용 (예: `esg.powernet.co.kr`). 도메인이 Cloudflare에 등록되어 있어야 한다 |
-| 설치 | Node.js 20 이상 |
+| Cloudflare 계정 | 없으면 생성 (무료) |
+| Node.js | 20 이상 |
+| 결제수단 | **R2(파일 저장소) 생성에 카드 등록이 필요하다.** 무료 사용량 안에서는 청구되지 않는다 |
+
+> 예상 비용은 월 1만원 이하다. 10명·3법인 규모는 D1·R2·Workers 모두 무료 사용량 안에 들어간다.
+> 요금제는 바뀔 수 있으니 결제 화면의 표시를 기준으로 본다.
 
 ```bash
-git clone <이 저장소>
+git clone https://github.com/jmkim0808/dashboard.git
 cd dashboard
+git checkout claude/esg-data-platform-planning-yimv1i
 npm install
 ```
 
@@ -27,7 +42,7 @@ npm install
 
 ---
 
-## 1. Cloudflare 로그인
+## A-1. Cloudflare 로그인
 
 ```bash
 npx wrangler login
@@ -39,118 +54,119 @@ npx wrangler login
 
 ---
 
-## 2. 데이터베이스와 파일 저장소 생성 (최초 1회)
+## A-2. 데이터베이스와 파일 저장소 만들기 (최초 1회)
 
 ```bash
 npx wrangler d1 create powernet-esg
 npx wrangler r2 bucket create powernet-esg-evidence
 ```
 
-첫 명령이 출력하는 `database_id` 를 복사해서 **`wrangler.toml`** 의 아래 부분에 붙여 넣는다.
+첫 명령이 출력하는 `database_id` 를 복사해서 **`wrangler.toml`** 에 붙여 넣는다.
 
 ```toml
 [[d1_databases]]
 binding = "DB"
 database_name = "powernet-esg"
-database_id = "여기에 붙여넣는다"
+database_id = "여기에 붙여넣는다"      ← 지금은 "[확인 필요 ...]" 로 되어 있다
 ```
 
 **확인** — `npx wrangler d1 list` 에 `powernet-esg` 가 보인다.
 
 ---
 
-## 3. 스키마와 기준정보 적용
+## A-3. 로컬에서 먼저 확인
 
-먼저 **로컬**에 적용해서 확인한다. 실수해도 되돌리기 쉽다.
+실수해도 되돌리기 쉬운 쪽부터 한다.
 
 ```bash
-npm run db:local
+npm run db:local        # 스키마 + 기준정보
+npm run db:factors      # 배출계수
 npm run db:count
-```
-
-`db:count` 결과가 **HQ 29 / SY 29 / VP 29** 여야 한다.
-해외법인 담당자 1인이 매월 입력할 항목 수다.
-
-제약이 살아있는지도 확인한다.
-
-```bash
 npm run verify
 ```
 
-`통과 23 / 실패 0` 이 나와야 한다.
-
-로컬이 정상이면 **운영**에 적용한다.
-
-```bash
-npm run db:remote
-```
-
-**확인** — 위 세 명령이 모두 통과한다.
+| 명령 | 기대 출력 |
+|---|---|
+| `db:count` | **HQ 29 · SY 29 · VP 29** (해외법인 담당자 1인이 매월 입력할 항목 수) |
+| `verify` | **통과 24 / 실패 0** |
 
 ---
 
-## 4. 로컬에서 먼저 띄워보기
+## A-4. 운영 데이터베이스에 적용
 
 ```bash
-cp .dev.vars.example .dev.vars
-npm run dev
+npm run db:remote           # 스키마 + 기준정보
+npm run db:factors:remote   # 배출계수 ← 이걸 빼면 산정이 전부 "미산정" 으로 나온다
 ```
 
-브라우저에서 `http://localhost:8787` 을 연다.
-
-이 단계에서는 로그인이 없으므로 **인증 항목이 "실패"** 로 나오는 것이 정상이다.
-**데이터베이스와 파일 저장소가 "정상"** 이면 된다.
-
-**확인** — 화면이 뜨고, 데이터베이스 카드에 `법인 3 · 지표 49 · 담당배정 111` 이 보인다.
+**확인** — 오류 없이 끝난다.
 
 ---
 
-## 5. 배포
+## A-5. 로그인 없이 한 번 띄워보기
+
+Access 를 아직 안 걸었으므로, 잠시 인증 요구를 끈다.
+**`wrangler.toml`** 의 아래 값을 바꾼다.
+
+```toml
+REQUIRE_ACCESS = "false"     # ← A 단계 동안만. B-4 에서 반드시 "true" 로 되돌린다
+```
 
 ```bash
-npm run check    # 설정 검증 (실제 배포 안 함)
+npm run check     # 설정 검증 (배포 안 함)
 npm run deploy
 ```
 
-**확인** — 배포 후 출력된 주소를 열면 로컬과 같은 화면이 나온다.
+배포가 끝나면 `https://powernet-esg.<계정>.workers.dev` 주소가 출력된다. 그 주소를 연다.
+
+**확인** — 네 가지가 보인다.
+
+| 항목 | 기대 상태 |
+|---|---|
+| 화면 | 경영진 현황 또는 기준정보 화면이 뜬다 |
+| 데이터베이스 (D1) | **정상** — 법인 3 · 지표 49 · 담당배정 111 |
+| 파일 저장소 (R2) | **정상** |
+| 배출계수 | **정상** — v2026.1 · 4건 |
+
+`#/health` 주소를 직접 열면 위 항목을 한 화면에서 볼 수 있다.
+
+> 🔴 **이 상태는 주소를 아는 사람이면 누구나 들어온다.** 실데이터를 넣지 않는다.
+> 심양·빈푹 담당자에게 주소를 보내 **접속만** 확인받는 용도로는 지금이 가장 빠르다. (EP6 1절)
+
+### ✅ A 단계 통과 조건
+
+- 화면이 뜨고 데이터베이스·파일 저장소·배출계수가 모두 **정상**
+- 심양·빈푹에서 그 주소가 열린다
+
+여기까지 되면 기술적 불확실성은 거의 해소된 것이다.
 
 ---
 
-## 6. 커스텀 도메인 연결
+# B. 운영 전환
 
-Cloudflare 대시보드 → **Workers & Pages** → `powernet-esg` → **Settings** → **Domains & Routes**
-→ **Add** → **Custom domain** → `esg.powernet.co.kr` 입력.
+실데이터를 넣기 전에 **반드시** 끝낸다.
+
+## B-1. 커스텀 도메인 연결
+
+Cloudflare 대시보드 → **Workers & Pages** → `powernet-esg` → **Settings**
+→ **Domains & Routes** → **Add** → **Custom domain** → `esg.powernet.co.kr`
+
+> 회사 도메인이 Cloudflare에 등록되어 있어야 한다. 등록되어 있지 않으면
+> 네임서버 변경이 필요하고 반영까지 수 시간 걸린다. **이것이 B 단계에서 가장 오래 걸리는 일이다.**
+> 전산 담당이 없으므로 도메인 관리 주체를 먼저 확인한다.
 
 **확인** — `https://esg.powernet.co.kr` 로 화면이 열린다.
 
-> 🔴 심양법인 접속 테스트를 이 시점에 한다. 심양 담당자에게 이 주소를 보내
-> ① 회사 유선망 ② 모바일 데이터 두 경로로 열리는지 확인받는다. (EP6 1절)
-
 ---
 
-## 7. 🔴 workers.dev 라우트 비활성화 — 건너뛰면 안 된다
+## B-2. Cloudflare Access 설정
 
-**Settings** → **Domains & Routes** → `powernet-esg.<계정>.workers.dev` 항목을 **Disable**.
-
-### 왜 필요한가
-
-이 시스템은 Cloudflare Access 가 붙여주는 헤더로 사용자를 식별한다.
-`workers.dev` 주소가 열려 있으면 **Access 를 우회해서 그 헤더를 위조**할 수 있다.
-커스텀 도메인만 남기고 닫아야 Access 가 실질적인 문이 된다.
-
-**확인** — `workers.dev` 주소가 더 이상 열리지 않는다.
-
----
-
-## 8. Cloudflare Access 설정
-
-Cloudflare 대시보드 → **Zero Trust** → **Access** → **Applications** → **Add an application**
-→ **Self-hosted**
+대시보드 → **Zero Trust** → **Access** → **Applications** → **Add an application** → **Self-hosted**
 
 | 항목 | 값 |
 |---|---|
 | Application name | `POWERNET ESG` |
-| Session duration | 24 hours (권장) |
+| Session duration | 24 hours |
 | Domain | `esg.powernet.co.kr` |
 
 **Policy** 추가:
@@ -161,17 +177,17 @@ Cloudflare 대시보드 → **Zero Trust** → **Access** → **Applications** �
 | Action | Allow |
 | Include | **Emails** → 사용할 10명의 이메일을 나열 |
 
-> 사용자가 10명이므로 이메일을 직접 나열하는 것이 가장 단순하다.
+> 10명이므로 이메일을 직접 나열하는 것이 가장 단순하다.
 > 회사 계정(Google Workspace·Microsoft 365)이 있으면 **Login methods** 에 연동해도 된다.
-> 연동하지 않으면 이메일로 일회용 코드(OTP)가 발송되는 방식으로 동작한다.
-
-**Zero Trust 요금** — Access 는 **50명까지 무료**다. 10명 규모는 비용이 발생하지 않는다.
+> 연동하지 않으면 이메일로 일회용 코드(OTP)가 오는 방식으로 동작한다.
+>
+> **Access 는 50명까지 무료다.** 10명 규모는 비용이 발생하지 않는다.
 
 **확인** — `https://esg.powernet.co.kr` 접속 시 로그인 화면이 먼저 나온다.
 
 ---
 
-## 9. 역할 매핑 등록
+## B-3. 역할 매핑 등록
 
 로그인한 사람이 어떤 역할인지 시스템에 알려준다.
 
@@ -179,12 +195,14 @@ Cloudflare 대시보드 → **Zero Trust** → **Access** → **Applications** �
 npx wrangler secret put ROLE_MAP
 ```
 
-프롬프트가 뜨면 아래 형태의 **JSON 한 줄**을 붙여 넣는다.
-(`.dev.vars.example` 에 예시가 있다.)
+프롬프트가 뜨면 아래 형태의 **JSON 한 줄**을 붙여 넣는다. (`.dev.vars.example` 에 예시가 있다.)
 
 ```json
 {"lead@powernet.co.kr":["HQ_LEAD","HQ_ADMIN"],"esg@powernet.co.kr":["HQ_ESG","SY_BACKUP","VP_BACKUP"],"facility@powernet.co.kr":["HQ_FACILITY"],"hr@powernet.co.kr":["HQ_HR"],"safety@powernet.co.kr":["HQ_SAFETY"],"prod@powernet.co.kr":["HQ_PROD"],"proc@powernet.co.kr":["HQ_PROC"],"ceo@powernet.co.kr":["HQ_EXEC"],"sy.ga@powernet.com.cn":["SY_OWNER"],"vp.ga@powernet.com.vn":["VP_OWNER"]}
 ```
+
+**B-2 의 Access Policy 에 넣은 이메일과 정확히 같아야 한다.** 한쪽에만 있으면
+로그인은 되는데 역할이 없는 상태(또는 그 반대)가 된다.
 
 ### 이메일이 데이터베이스에 들어가지 않는 이유
 
@@ -194,37 +212,88 @@ Worker 는 로그인한 이메일을 역할코드로 바꾼 직후 버리고, �
 그래서 이 시스템에는 개인정보가 **한 건도** 없다. 중국·베트남의 개인정보 국외이전
 규제(2026년 1월 강화) 적용 대상 자체가 되지 않는다. (R84 / R85)
 
-> 해외법인 부담당자 인력 여력이 없으면, 본사 ESG 총괄 담당자의 이메일에
+> 해외법인 부담당자 인력 여력이 없으면, 본사 ESG 총괄 이메일에
 > `SY_BACKUP` · `VP_BACKUP` 을 함께 넣는다. 위 예시가 그렇게 되어 있다.
-
-**확인** — 화면의 **내 역할** 영역에 자신의 역할과 담당 항목 수가 표시된다.
 
 ---
 
-## 10. 재배포 후 최종 확인
+## B-4. 🔴 인증 요구 되돌리기
+
+A-5 에서 꺼 두었던 것을 **반드시** 켠다. **`wrangler.toml`**:
+
+```toml
+REQUIRE_ACCESS = "true"
+```
 
 ```bash
 npm run deploy
 ```
 
-`https://esg.powernet.co.kr` 를 열고 네 항목을 확인한다.
+**확인** — 로그아웃 상태(시크릿 창)로 접속하면 로그인 화면이 먼저 나온다.
+
+---
+
+## B-5. 🔴 workers.dev 라우트 비활성화 — 건너뛰면 안 된다
+
+**Settings** → **Domains & Routes** → `powernet-esg.<계정>.workers.dev` 항목을 **Disable**.
+
+### 왜 필요한가
+
+이 시스템은 Cloudflare Access 가 붙여주는 헤더로 사용자를 식별한다.
+`workers.dev` 주소가 열려 있으면 **Access 를 우회해서 그 헤더를 위조**할 수 있다.
+커스텀 도메인만 남기고 닫아야 Access 가 실질적인 문이 된다.
+
+**B-2(Access 설정)를 먼저 끝낸 뒤에 닫는다.** 순서가 바뀌면 들어갈 문이 없어진다.
+
+**확인** — `workers.dev` 주소가 더 이상 열리지 않는다.
+
+---
+
+## B-6. 최종 확인
+
+`https://esg.powernet.co.kr` 를 열고 `#/health` 를 확인한다.
 
 | 항목 | 기대 상태 |
 |---|---|
-| 인증 (Cloudflare Access) | **정상** — 부여된 역할이 표시됨 |
-| 데이터베이스 (D1) | **정상** — 법인 3 · 지표 49 · 담당배정 111 · 월간 항목 각 29 |
+| 인증 (Cloudflare Access) | **정상** — 내 역할과 담당 항목 수가 표시됨 |
+| 데이터베이스 (D1) | **정상** — 법인 3 · 지표 49 · 담당배정 111 |
 | 파일 저장소 (R2) | **정상** |
-| 배출계수 | **주의** ← 이 단계에서는 정상이다 |
+| 배출계수 | **정상** — v2026.1 |
 
-**배출계수가 "주의"인 것은 정상이다.** 실제 고시값(EP8 B4) 확인 후 등록하며,
-입력·검증 화면은 계수 없이 동작한다. 산정 로직(W3, 10/6~10) 전까지 확보하면 된다.
+이어서 **역할별로** 한 번씩 열어본다. 담당자가 교육 때 보게 될 화면이다.
 
-### ✅ G0 게이트 통과 조건
+| 계정 | 기대 화면 |
+|---|---|
+| 파트장 | 경영진 현황. 메뉴에 검증·승인 · 데이터북 · 기준정보가 모두 보인다 |
+| 심양 담당 | **중국어** 월간 입력 시트. 메뉴에 데이터북·기준정보가 **안 보인다** |
+| 빈푹 담당 | **베트남어** 월간 입력 시트 |
 
-- 인증 · 데이터베이스 · 파일 저장소 = **정상**
-- 심양·빈푹 담당자가 해당 주소에 접속 가능
+### ✅ B 단계 통과 조건
 
-여기까지 되면 **W1(2026-09-22~26, 기준정보 관리 화면)** 으로 넘어간다.
+- 로그인 없이는 아무것도 열리지 않는다
+- 각 담당자가 자기 역할의 화면만 본다
+- 심양·빈푹에서 접속된다
+
+여기까지 되면 **담당자 교육**(`docs/ops/w4-test.md`)으로 넘어간다.
+
+---
+
+## 실데이터를 넣기 전에
+
+A 단계에서 넣은 테스트 데이터가 남아 있으면 지운다.
+
+```bash
+npx wrangler d1 execute powernet-esg --remote --command="SELECT COUNT(*) FROM entry"
+```
+
+0 이 아니면, 스키마부터 다시 적용해 비운다. **입력값은 트리거가 삭제를 막으므로(D-4),
+지우는 방법은 데이터베이스를 다시 만드는 것뿐이다.**
+
+```bash
+npx wrangler d1 delete powernet-esg      # 되돌릴 수 없다. 테스트 데이터만 들어 있을 때만 한다
+npx wrangler d1 create powernet-esg      # 새 database_id 를 wrangler.toml 에 다시 붙여넣는다
+npm run db:remote && npm run db:factors:remote && npm run deploy
+```
 
 ---
 
@@ -241,17 +310,28 @@ npx wrangler tail
 > 요약하지 말고 **오류 메시지 전문**을 붙여 넣는다. AI는 오류 한 줄로 원인을 특정할 수 있지만,
 > 요약된 증상으로는 추측만 한다. (EP8 원칙 6)
 
+### 자주 막히는 곳
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| 배포는 됐는데 화면이 "로그인 필요"만 뜬다 | `REQUIRE_ACCESS="true"` 인데 Access 미설정 | A 단계면 `"false"` 로, B 단계면 B-2 를 끝낸다 |
+| 로그인은 되는데 "역할 미매핑" | `ROLE_MAP` 에 그 이메일이 없다 | B-3 의 JSON 과 B-2 의 Policy 이메일을 맞춘다 |
+| 산정값이 전부 "미산정" | 배출계수 미적용 | `npm run db:factors:remote` |
+| `db:remote` 가 "table already exists" | 이미 적용된 DB | 정상이다. 다시 적용할 필요 없다 |
+| 심양에서만 안 열린다 | 망 경로 | 모바일 데이터로 재시도 → 되면 사내망 문제. EP6 1절 |
+
 ---
 
 ## 명령 요약
 
 | 명령 | 용도 |
 |---|---|
-| `npm run dev` | 로컬에서 띄우기 |
+| `npm run dev` | 로컬에서 띄우기 (`localhost:8787`) |
 | `npm run check` | 설정 검증 (배포 안 함) |
 | `npm run deploy` | 운영 배포 |
-| `npm run db:local` | 로컬 DB에 스키마·기준정보 적용 |
-| `npm run db:remote` | 운영 DB에 적용 |
-| `npm run db:count` | 법인별 월간 항목 수 확인 (각 29) |
-| `npm run verify` | 제약 검증 (23항목) |
+| `npm run db:local` / `db:factors` | 로컬 DB에 스키마·기준정보 / 배출계수 |
+| `npm run db:remote` / `db:factors:remote` | 운영 DB에 적용 |
+| `npm run db:count` | 법인별 월간 항목 수 (각 29) |
+| `npm run verify` | 제약 검증 (24항목) |
+| `npm run g3` | 산정 검산 (84항목) — dev 서버를 띄운 상태에서 |
 | `npx wrangler tail` | 운영 로그 실시간 보기 |
