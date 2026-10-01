@@ -53,9 +53,13 @@ npm install
 
 ```powershell
 $repo = $PWD.Path
-function wr { & "$repo\node_modules\.bin\wrangler" @args }
+function wr { & "$repo\node_modules\.bin\wrangler.cmd" @args }
 wr --version
 ```
+
+> **`.cmd` 를 빼면 안 된다.** `node_modules\.bin` 에는 확장자 없는 `wrangler`(맥·리눅스용)도 있어서,
+> 전체 경로로 그 파일을 가리키면 아무것도 출력되지 않고 끝난다.
+> `.ps1` 은 실행 정책에 막힐 수 있으므로 `.cmd` 를 쓴다.
 
 PowerShell 창을 닫았다 열면 위 두 줄을 다시 실행한다.
 `npm run dev` · `npm run deploy` 같은 `npm run ~` 명령은 별명 없이도 동작한다.
